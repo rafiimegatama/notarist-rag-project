@@ -1,0 +1,36 @@
+version: '3.9'
+
+# Local development overrides.
+# This file is automatically merged by Docker Compose when running:
+#   docker compose up
+#
+# Do NOT commit secrets to this file — use .env.local for local secrets.
+# This file is safe to commit: it only contains local-dev convenience settings.
+
+services:
+
+  postgres:
+    # Expose PostgreSQL for local DBeaver / pgAdmin connection
+    ports:
+      - "5432:5432"
+    environment:
+      # Disable fsync for faster local dev (NEVER on production)
+      POSTGRES_INITDB_ARGS: "--auth-host=md5"
+
+  qdrant:
+    # Expose Qdrant dashboard on :6333 for local inspection
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+  minio:
+    # Expose MinIO console on :9001 for local bucket inspection
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  ollama:
+    # Pull model on container start (local dev only)
+    # In production, models are pre-baked into a custom image or volume snapshot
+    entrypoint: ["/bin/sh", "-c",
+      "ollama serve & sleep 5 && ollama pull llama3.2:3b-instruct-q8_0 && wait"]

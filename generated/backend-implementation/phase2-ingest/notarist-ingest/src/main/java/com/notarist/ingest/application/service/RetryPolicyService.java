@@ -74,10 +74,14 @@ public class RetryPolicyService {
         job.moveToDlq("INGEST_MAX_RETRIES_EXCEEDED");
         jobRepository.save(job);
 
+        PipelineStatus failedStage = job.getFailureStage() != null
+                ? PipelineStatus.valueOf(job.getFailureStage())
+                : PipelineStatus.FAILED;
         DeadLetterEntry entry = DeadLetterEntry.create(
                 job.getIngestionId(),
                 job.getJobId(),
-                PipelineStatus.FAILED,
+                job.getTenantId(),
+                failedStage,
                 job.getRetryCount(),
                 job.getLastErrorCode(),
                 job.getLastErrorHash(),

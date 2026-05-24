@@ -1,6 +1,6 @@
 package com.notarist.ingest.domain.service;
 
-import com.notarist.ingest.domain.model.DocumentChecksum;
+import com.notarist.core.domain.valueobject.DocumentChecksum;
 import com.notarist.ingest.domain.exception.IngestionStageException;
 import com.notarist.ingest.domain.model.PipelineStatus;
 

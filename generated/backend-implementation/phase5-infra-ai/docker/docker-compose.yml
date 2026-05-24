@@ -1,0 +1,123 @@
+version: '3.9'
+
+# NOTARIST RAG PLATFORM — Infrastructure Stack
+# Oracle 19C NOT included: requires enterprise license.
+# Provision Oracle separately and set ORACLE_* variables in .env.
+
+services:
+
+  # ─────────────────────────────────────────────
+  # MinIO — Object storage for raw documents and OCR output
+  # ─────────────────────────────────────────────
+  minio:
+    image: minio/minio:RELEASE.2024-03-15T01-07-15Z
+    container_name: notarist-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - notarist-net
+
+  # ─────────────────────────────────────────────
+  # PostgreSQL — BM25 keyword search (chunk_index) + search_query_log
+  # ─────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: notarist-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-notarist_search}
+      POSTGRES_USER:     ${POSTGRES_USER:-notarist}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-notarist123}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-notarist} -d ${POSTGRES_DB:-notarist_search}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - notarist-net
+
+  # ─────────────────────────────────────────────
+  # Qdrant — Dense vector search for semantic retrieval
+  # ─────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.8.4
+    container_name: notarist-qdrant
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__LOG_LEVEL: WARN
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/readyz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - notarist-net
+
+  # ─────────────────────────────────────────────
+  # Ollama — Local LLM inference (Phase 5B activation)
+  # Model pull: docker exec notarist-ollama ollama pull llama3.2:3b-instruct-q8_0
+  # ─────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:0.3.12
+    container_name: notarist-ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_LOADED_MODELS: 1
+    restart: unless-stopped
+    networks:
+      - notarist-net
+    # GPU support: uncomment when NVIDIA runtime is available
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  minio-data:
+    name: notarist_minio_data
+  postgres-data:
+    name: notarist_postgres_data
+  qdrant-data:
+    name: notarist_qdrant_data
+  ollama-models:
+    name: notarist_ollama_models
+
+networks:
+  notarist-net:
+    name: notarist_network
+    driver: bridge

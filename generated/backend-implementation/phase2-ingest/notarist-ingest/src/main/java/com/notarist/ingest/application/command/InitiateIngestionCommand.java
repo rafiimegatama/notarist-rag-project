@@ -2,8 +2,8 @@ package com.notarist.ingest.application.command;
 
 import com.notarist.core.domain.valueobject.ClassificationLevel;
 import com.notarist.core.domain.valueobject.CorrelationId;
+import com.notarist.core.domain.valueobject.DocumentChecksum;
 import com.notarist.core.domain.valueobject.JenisDokumen;
-import com.notarist.ingest.domain.model.DocumentChecksum;
 
 import java.util.UUID;
 

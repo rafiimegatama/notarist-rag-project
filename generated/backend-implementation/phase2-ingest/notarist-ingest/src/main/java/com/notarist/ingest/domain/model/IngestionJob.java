@@ -1,6 +1,7 @@
 package com.notarist.ingest.domain.model;
 
 import com.notarist.core.domain.valueobject.*;
+import com.notarist.ingest.domain.service.PipelineStateMachine;
 
 import java.time.Instant;
 import java.util.ArrayList;

@@ -12,7 +12,7 @@ import com.notarist.ingest.application.command.InitiateIngestionCommand;
 import com.notarist.ingest.application.port.in.GetIngestionStatusUseCase;
 import com.notarist.ingest.application.port.in.InitiateIngestionUseCase;
 import com.notarist.ingest.application.service.UploadOrchestrationService;
-import com.notarist.ingest.domain.model.DocumentChecksum;
+import com.notarist.core.domain.valueobject.DocumentChecksum;
 import com.notarist.ingest.domain.model.IngestionId;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;

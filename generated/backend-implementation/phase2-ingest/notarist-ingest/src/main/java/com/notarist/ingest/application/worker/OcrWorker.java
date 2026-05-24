@@ -1,6 +1,8 @@
 package com.notarist.ingest.application.worker;
 
-import com.notarist.ingest.application.port.out.OcrServicePort;
+import com.notarist.core.domain.ocr.OcrConfig;
+import com.notarist.core.domain.ocr.OcrResult;
+import com.notarist.core.port.ocr.OcrPort;
 import com.notarist.ingest.domain.exception.IngestionStageException;
 import com.notarist.ingest.domain.model.IngestionJob;
 import com.notarist.ingest.domain.model.PipelineStatus;
@@ -9,15 +11,20 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * OCR pipeline stage worker.
+ * PHASE 6A.2-FIX: migrated from OcrServicePort to core.OcrPort.
+ * Injected impl is PaddleOcrAdapter (notarist-runtime, @Component).
+ */
 @Service
 public class OcrWorker implements StageWorker {
 
     private static final Logger log = LoggerFactory.getLogger(OcrWorker.class);
 
-    private final OcrServicePort ocrServicePort;
+    private final OcrPort ocrPort;
 
-    public OcrWorker(OcrServicePort ocrServicePort) {
-        this.ocrServicePort = ocrServicePort;
+    public OcrWorker(OcrPort ocrPort) {
+        this.ocrPort = ocrPort;
     }
 
     @Override
@@ -32,16 +39,16 @@ public class OcrWorker implements StageWorker {
 
         log.info("OCR worker starting: ingestionId={} objectKey={}", context.ingestionId(), objectKey);
 
-        OcrServicePort.OcrResult result;
+        OcrResult result;
         try {
-            result = ocrServicePort.extractText(objectKey, OcrServicePort.OcrConfig.defaultIndonesia());
+            result = ocrPort.extractText(objectKey, OcrConfig.defaultIndonesia());
         } catch (Exception e) {
             throw IngestionStageException.retryable(
                     "INGEST_OCR_SIDECAR_ERROR", PipelineStatus.OCR_PENDING,
                     "OCR sidecar call failed for ingestionId=" + context.ingestionId() + ": " + e.getMessage());
         }
 
-        if (result.confidenceAvg() < 0.4f) {
+        if (result.confidenceAvg() < OcrConfig.defaultIndonesia().minConfidenceThreshold()) {
             log.warn("Low OCR confidence {} for ingestionId={}",
                     result.confidenceAvg(), context.ingestionId());
         }
@@ -52,9 +59,9 @@ public class OcrWorker implements StageWorker {
                     "OCR produced no text for ingestionId=" + context.ingestionId());
         }
 
-        log.info("OCR completed: ingestionId={} pages={} chars={} confidence={}",
+        log.info("OCR completed: ingestionId={} pages={} chars={} confidence={} durationMs={}",
                 context.ingestionId(), result.pageCount(),
-                result.extractedTextLength(), result.confidenceAvg());
+                result.extractedTextLength(), result.confidenceAvg(), result.durationMs());
     }
 
     private String buildRawObjectKey(IngestionJob job) {

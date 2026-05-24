@@ -8,9 +8,11 @@ import com.notarist.runtime.guard.ContextOverflowGuard;
 import com.notarist.runtime.metrics.RuntimeMetricsRegistry;
 import com.notarist.runtime.model.ModelProvider;
 import com.notarist.runtime.model.ModelRegistry;
+import jakarta.annotation.PostConstruct;
 import okhttp3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -39,10 +41,12 @@ public class OllamaRuntimeAdapter implements LlmPort {
 
     private static final Logger log = LoggerFactory.getLogger(OllamaRuntimeAdapter.class);
 
-    private static final int    OLLAMA_INFERENCE_TIMEOUT_MS = 60_000;
-    private static final String CHAT_PATH                   = "/api/chat";
+    private static final String CHAT_PATH = "/api/chat";
 
-    private final OkHttpClient                 httpClient;
+    @Value("${notarist.runtime.ollama.inference-timeout-ms:60000}")
+    private long inferenceTimeoutMs;
+
+    private OkHttpClient                       httpClient;
     private final ObjectMapper                 objectMapper;
     private final ModelRegistry                modelRegistry;
     private final RuntimeMetricsRegistry       metrics;
@@ -67,11 +71,16 @@ public class OllamaRuntimeAdapter implements LlmPort {
         this.overflowGuard       = overflowGuard;
         this.objectMapper        = objectMapper;
 
+    }
+
+    @PostConstruct
+    private void initHttpClient() {
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(5, TimeUnit.SECONDS)
-                .readTimeout(OLLAMA_INFERENCE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .readTimeout(inferenceTimeoutMs, TimeUnit.MILLISECONDS)
                 .writeTimeout(10, TimeUnit.SECONDS)
                 .build();
+        log.info("OllamaRuntimeAdapter: httpClient initialised with inferenceTimeoutMs={}", inferenceTimeoutMs);
     }
 
     @Override

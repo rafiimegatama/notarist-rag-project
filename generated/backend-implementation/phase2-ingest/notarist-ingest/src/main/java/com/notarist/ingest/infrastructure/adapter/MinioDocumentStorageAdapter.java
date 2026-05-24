@@ -8,14 +8,17 @@ import io.minio.*;
 import io.minio.http.Method;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-@Component
+/**
+ * PHASE 6A.2-FIX: @Component REMOVED.
+ * Production bean: com.notarist.infra.minio.MinioDocumentStorageAdapter (notarist-infra)
+ * which adds resilience (DegradedModeRegistry, NotaristRetryPolicy).
+ * This implementation is kept for reference — infra version supersedes it.
+ */
 public class MinioDocumentStorageAdapter implements DocumentStoragePort {
 
     private static final Logger log = LoggerFactory.getLogger(MinioDocumentStorageAdapter.class);

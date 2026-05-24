@@ -22,6 +22,10 @@ public record NerCompletedEvent(
     long processingMs
 ) implements DomainEvent {
 
+    public NerCompletedEvent {
+        entitiesExtracted = Map.copyOf(entitiesExtracted != null ? entitiesExtracted : Map.of());
+    }
+
     @Override public String eventType() { return "ner.completed"; }
     @Override public String publishedBy() { return "notarist-ingest"; }
 }

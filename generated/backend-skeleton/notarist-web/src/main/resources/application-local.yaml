@@ -1,0 +1,42 @@
+# ─────────────────────────────────────────────────────────────────
+# application-local.yaml — LOCAL DEVELOPMENT OVERRIDES
+#
+# Activated by: SPRING_PROFILES_ACTIVE=local (default in application.yaml)
+# Purpose: docker-compose local stack; debug logging; relaxed timeouts
+#
+# NEVER DEPLOY THIS FILE to staging or production.
+# Credential values here are docker-compose defaults only.
+# ─────────────────────────────────────────────────────────────────
+
+notarist:
+  infra:
+    minio:
+      access-key: minioadmin
+      secret-key: minioadmin
+    datasource:
+      oracle:
+        url: jdbc:oracle:thin:@localhost:1521/NOTARISTDB
+        pool-max: 5
+        pool-min: 2
+      postgres:
+        url: jdbc:postgresql://localhost:5432/notarist
+        pool-max: 5
+        pool-min: 2
+
+  security:
+    jwt:
+      private-key-path: file:./keys/notarist-private.pem
+      public-key-path: file:./keys/notarist-public.pem
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus,env,beans
+
+logging:
+  level:
+    root: INFO
+    com.notarist: DEBUG
+    org.springframework.security: DEBUG
+    org.hibernate.SQL: DEBUG

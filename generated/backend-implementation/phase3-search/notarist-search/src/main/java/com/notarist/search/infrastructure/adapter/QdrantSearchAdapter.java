@@ -4,17 +4,17 @@ import com.notarist.core.domain.valueobject.ClassificationLevel;
 import com.notarist.search.application.port.out.VectorSearchPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Qdrant vector search stub — Phase 3.
- * Real bge-m3 query encoding + Qdrant HTTP integration deferred to Phase 4.
- * Returns empty list so BM25 results drive retrieval during this phase.
+ * Returns empty list so BM25 results drive retrieval during pipeline testing.
+ *
+ * PHASE 6A.2-FIX: @Component REMOVED.
+ * Production bean: com.notarist.infra.qdrant.QdrantSearchAdapter (notarist-infra).
+ * Test usage: declare as @Bean in @TestConfiguration.
  */
-@Component
 public class QdrantSearchAdapter implements VectorSearchPort {
 
     private static final Logger log = LoggerFactory.getLogger(QdrantSearchAdapter.class);

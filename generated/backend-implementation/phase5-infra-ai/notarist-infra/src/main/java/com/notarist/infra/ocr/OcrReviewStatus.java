@@ -1,5 +1,10 @@
 package com.notarist.infra.ocr;
 
+// MIGRATED to com.notarist.core.domain.ocr.OcrReviewStatus (Phase 6A.1 boundary fix).
+// This class is retained as a deprecated wrapper to avoid breaking any
+// infra-internal references until the next cleanup pass.
+// All external consumers must import from notarist-core.
+
 /**
  * OCR review status for legal documents.
  *

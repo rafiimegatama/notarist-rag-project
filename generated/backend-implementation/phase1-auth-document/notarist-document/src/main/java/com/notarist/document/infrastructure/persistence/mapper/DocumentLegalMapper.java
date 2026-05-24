@@ -7,7 +7,6 @@ import com.notarist.document.domain.model.DocumentStatus;
 import com.notarist.document.infrastructure.persistence.oracle.DocumentLegalJpaEntity;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
 import java.util.UUID;
 
 @Component
@@ -17,11 +16,11 @@ public class DocumentLegalMapper {
         DocumentLegal doc = new DocumentLegal(
                 new DocumentId(UUID.fromString(e.getDocumentId())),
                 e.getDocumentTitle(),
-                JenisDokumen.valueOf(e.getDocumentType()),
-                e.getJenisAkta() != null ? JenisAkta.valueOf(e.getJenisAkta()) : null,
+                e.getDocumentType(),
+                e.getJenisAkta(),
                 e.getNomorAkta() != null ? new NomorAkta(e.getNomorAkta()) : null,
                 e.getTanggalAkta(),
-                ClassificationLevel.valueOf(e.getClassificationLevel()),
+                e.getClassificationLevel(),
                 e.getMinioObjectKey(),
                 e.getChecksumSha256(),
                 e.getFileSizeBytes(),
@@ -30,7 +29,7 @@ public class DocumentLegalMapper {
                 UUID.fromString(e.getTenantId()),
                 UUID.fromString(e.getUploadedBy())
         );
-        doc.transitionStatus(DocumentStatus.valueOf(e.getStatus()));
+        doc.transitionStatus(e.getStatus());
         doc.setPageCount(e.getPageCount());
         if (e.getIndexedAt() != null) {
             doc.markIndexed(e.getIndexedAt());
@@ -42,12 +41,12 @@ public class DocumentLegalMapper {
         return new DocumentLegalJpaEntity(
                 d.getDocumentId().value().toString(),
                 d.getDocumentTitle(),
-                d.getDocumentType().name(),
-                d.getJenisAkta() != null ? d.getJenisAkta().name() : null,
+                d.getDocumentType(),
+                d.getJenisAkta(),
                 d.getNomorAkta() != null ? d.getNomorAkta().value() : null,
                 d.getTanggalAkta(),
-                d.getClassificationLevel().name(),
-                d.getStatus().name(),
+                d.getClassificationLevel(),
+                d.getStatus(),
                 d.getMinioObjectKey(),
                 d.getChecksumSha256(),
                 d.getFileSizeBytes(),

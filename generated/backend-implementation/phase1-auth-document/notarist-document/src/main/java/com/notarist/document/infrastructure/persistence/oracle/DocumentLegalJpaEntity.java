@@ -1,9 +1,19 @@
 package com.notarist.document.infrastructure.persistence.oracle;
 
+import com.notarist.core.domain.valueobject.ClassificationLevel;
+import com.notarist.core.domain.valueobject.JenisAkta;
+import com.notarist.core.domain.valueobject.JenisDokumen;
+import com.notarist.document.domain.model.DocumentStatus;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.time.LocalDate;
 
+/**
+ * PHASE 6A.2-FIX: enum fields added @Enumerated(EnumType.STRING).
+ * documentType → JenisDokumen, jenisAkta → JenisAkta,
+ * classificationLevel → ClassificationLevel, status → DocumentStatus.
+ * Mapper (DocumentLegalMapper) updated: remove .name()/.valueOf() conversions.
+ */
 @Entity
 @Table(name = "DOKUMEN_LEGAL", schema = "NOTARIST")
 public class DocumentLegalJpaEntity {
@@ -15,11 +25,13 @@ public class DocumentLegalJpaEntity {
     @Column(name = "DOCUMENT_TITLE", length = 500, nullable = false)
     private String documentTitle;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "DOCUMENT_TYPE", length = 50, nullable = false)
-    private String documentType;
+    private JenisDokumen documentType;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "JENIS_AKTA", length = 50)
-    private String jenisAkta;
+    private JenisAkta jenisAkta;
 
     @Column(name = "NOMOR_AKTA", length = 100)
     private String nomorAkta;
@@ -27,16 +39,18 @@ public class DocumentLegalJpaEntity {
     @Column(name = "TANGGAL_AKTA")
     private LocalDate tanggalAkta;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "CLASSIFICATION_LEVEL", length = 50, nullable = false)
-    private String classificationLevel;
+    private ClassificationLevel classificationLevel;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "STATUS", length = 50, nullable = false)
-    private String status;
+    private DocumentStatus status;
 
     @Column(name = "MINIO_OBJECT_KEY", length = 500, nullable = false)
     private String minioObjectKey;
 
-    @Column(name = "CHECKSUM_SHA256", length = 64, nullable = false)
+    @Column(name = "CHECKSUM_SHA256", length = 64, nullable = false, updatable = false)
     private String checksumSha256;
 
     @Column(name = "FILE_SIZE_BYTES")
@@ -69,11 +83,12 @@ public class DocumentLegalJpaEntity {
     protected DocumentLegalJpaEntity() {}
 
     public DocumentLegalJpaEntity(
-            String documentId, String documentTitle, String documentType, String jenisAkta,
-            String nomorAkta, LocalDate tanggalAkta, String classificationLevel, String status,
-            String minioObjectKey, String checksumSha256, Long fileSizeBytes, String mimeType,
-            String notarisId, String tenantId, String uploadedBy, Integer pageCount,
-            int versionNumber, Instant createdAt, Instant indexedAt) {
+            String documentId, String documentTitle, JenisDokumen documentType, JenisAkta jenisAkta,
+            String nomorAkta, LocalDate tanggalAkta, ClassificationLevel classificationLevel,
+            DocumentStatus status, String minioObjectKey, String checksumSha256,
+            Long fileSizeBytes, String mimeType, String notarisId, String tenantId,
+            String uploadedBy, Integer pageCount, int versionNumber,
+            Instant createdAt, Instant indexedAt) {
         this.documentId = documentId;
         this.documentTitle = documentTitle;
         this.documentType = documentType;
@@ -97,12 +112,12 @@ public class DocumentLegalJpaEntity {
 
     public String getDocumentId() { return documentId; }
     public String getDocumentTitle() { return documentTitle; }
-    public String getDocumentType() { return documentType; }
-    public String getJenisAkta() { return jenisAkta; }
+    public JenisDokumen getDocumentType() { return documentType; }
+    public JenisAkta getJenisAkta() { return jenisAkta; }
     public String getNomorAkta() { return nomorAkta; }
     public LocalDate getTanggalAkta() { return tanggalAkta; }
-    public String getClassificationLevel() { return classificationLevel; }
-    public String getStatus() { return status; }
+    public ClassificationLevel getClassificationLevel() { return classificationLevel; }
+    public DocumentStatus getStatus() { return status; }
     public String getMinioObjectKey() { return minioObjectKey; }
     public String getChecksumSha256() { return checksumSha256; }
     public Long getFileSizeBytes() { return fileSizeBytes; }
@@ -115,7 +130,7 @@ public class DocumentLegalJpaEntity {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getIndexedAt() { return indexedAt; }
 
-    public void setStatus(String status) { this.status = status; }
+    public void setStatus(DocumentStatus status) { this.status = status; }
     public void setIndexedAt(Instant indexedAt) { this.indexedAt = indexedAt; }
     public void setPageCount(Integer pageCount) { this.pageCount = pageCount; }
 }

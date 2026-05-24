@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────
+# application-staging.yaml — STAGING ENVIRONMENT OVERRIDES
+#
+# Activated by: SPRING_PROFILES_ACTIVE=staging
+# Purpose: production-like config; reduced actuator exposure; no debug
+#
+# ALL sensitive values must be set via environment variables.
+# No credential defaults are permitted in this file.
+# ─────────────────────────────────────────────────────────────────
+
+notarist:
+  infra:
+    datasource:
+      oracle:
+        pool-max: 15
+        pool-min: 5
+      postgres:
+        pool-max: 10
+        pool-min: 3
+  runtime:
+    ollama:
+      inference-timeout-ms: 60000
+
+  ingest:
+    queue:
+      max-concurrent-workers: 5
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    root: INFO
+    com.notarist: INFO
+    org.springframework.security: WARN

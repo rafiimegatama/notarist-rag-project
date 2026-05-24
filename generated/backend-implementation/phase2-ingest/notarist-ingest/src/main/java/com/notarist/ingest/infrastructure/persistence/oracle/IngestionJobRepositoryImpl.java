@@ -16,6 +16,14 @@ import org.springframework.stereotype.Repository;
 import java.time.Instant;
 import java.util.*;
 
+/**
+ * PHASE 6A.2-FIX:
+ *   - toEntity(): removed .name() for enum fields (JPA handles via @Enumerated)
+ *   - updateEntity(): removed .name() for enum setters
+ *   - toDomain(): removed .valueOf() for enum fields (JPA delivers typed enum directly)
+ *   - findByStatusAndTenantId(): passes PipelineStatus enum directly (not .name())
+ *   - findFailedAndReadyForRetry(): passes PipelineStatus.FAILED enum (not hardcoded string)
+ */
 @Repository
 public class IngestionJobRepositoryImpl implements IngestJobRepository {
 
@@ -67,14 +75,15 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
     public List<IngestionJob> findByStatusAndTenantId(PipelineStatus status, UUID tenantId, int limit) {
         vpdContextApplier.applyIfPresent(entityManager);
         return jpaRepository.findByPipelineStatusAndTenantId(
-                        status.name(), tenantId.toString(), PageRequest.of(0, limit))
+                        status, tenantId.toString(), PageRequest.of(0, limit))
                 .stream().map(this::toDomain).toList();
     }
 
     @Override
     public List<IngestionJob> findFailedAndReadyForRetry(int maxRetries, int limit) {
         vpdContextApplier.applyIfPresent(entityManager);
-        return jpaRepository.findFailedReadyForRetry(Instant.now(), maxRetries, PageRequest.of(0, limit))
+        return jpaRepository.findFailedReadyForRetry(
+                        PipelineStatus.FAILED, Instant.now(), maxRetries, PageRequest.of(0, limit))
                 .stream().map(this::toDomain).toList();
     }
 
@@ -85,12 +94,12 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
                 job.getDocumentId().value().toString(),
                 job.getTenantId().toString(),
                 job.getUploadedBy().toString(),
-                job.getDocumentType().name(),
-                job.getClassificationLevel().name(),
+                job.getDocumentType(),
+                job.getClassificationLevel(),
                 job.getOriginalFilename(),
                 job.getChecksum().sha256Hex(),
-                job.getPipelineStatus().name(),
-                job.getOverallStatus().name(),
+                job.getPipelineStatus(),
+                job.getOverallStatus(),
                 job.getFailureStage(),
                 job.getRetryCount(),
                 job.getLastErrorCode(),
@@ -104,8 +113,8 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
     }
 
     private IngestionJobJpaEntity updateEntity(IngestionJobJpaEntity entity, IngestionJob job) {
-        entity.setPipelineStatus(job.getPipelineStatus().name());
-        entity.setOverallStatus(job.getOverallStatus().name());
+        entity.setPipelineStatus(job.getPipelineStatus());
+        entity.setOverallStatus(job.getOverallStatus());
         entity.setFailureStage(job.getFailureStage());
         entity.setRetryCount(job.getRetryCount());
         entity.setLastErrorCode(job.getLastErrorCode());
@@ -126,11 +135,11 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
                 UUID.fromString(entity.getTenantId()),
                 UUID.fromString(entity.getUploadedBy()),
                 new DocumentChecksum(entity.getChecksumSha256()),
-                JenisDokumen.valueOf(entity.getDocumentType()),
-                ClassificationLevel.valueOf(entity.getClassificationLevel()),
+                entity.getDocumentType(),
+                entity.getClassificationLevel(),
                 entity.getOriginalFilename(),
-                PipelineStatus.valueOf(entity.getPipelineStatus()),
-                JobStatus.valueOf(entity.getOverallStatus()),
+                entity.getPipelineStatus(),
+                entity.getOverallStatus(),
                 deserializeHistory(entity.getStageHistoryJson()),
                 entity.getFailureStage(),
                 entity.getRetryCount(),

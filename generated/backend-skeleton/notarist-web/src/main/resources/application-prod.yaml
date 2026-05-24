@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────────
+# application-prod.yaml — PRODUCTION OVERRIDES
+#
+# Activated by: SPRING_PROFILES_ACTIVE=prod
+# Purpose: hardened production configuration
+#
+# RULES:
+#   1. No credential values in this file — all via secrets manager / vault
+#   2. Minimal actuator exposure — liveness/readiness only
+#   3. No debug logging
+#   4. Production pool sizing
+#   5. Stricter JWT TTL
+#
+# Required env vars (will fail fast without defaults):
+#   ORACLE_PASSWORD, POSTGRES_PASSWORD,
+#   MINIO_ACCESS_KEY, MINIO_SECRET_KEY,
+#   APP_ENCRYPTION_KEY, APP_ENCRYPTION_SALT,
+#   JWT_PRIVATE_KEY_PATH, JWT_PUBLIC_KEY_PATH   ← no fallback in prod
+# ─────────────────────────────────────────────────────────────────
+
+notarist:
+  security:
+    jwt:
+      private-key-path: ${JWT_PRIVATE_KEY_PATH}
+      public-key-path: ${JWT_PUBLIC_KEY_PATH}
+      access-token-ttl-minutes: ${JWT_ACCESS_TOKEN_TTL_MINUTES:10}
+      refresh-token-ttl-days: ${JWT_REFRESH_TOKEN_TTL_DAYS:3}
+
+  infra:
+    datasource:
+      oracle:
+        pool-max: ${ORACLE_POOL_MAX:30}
+        pool-min: ${ORACLE_POOL_MIN:10}
+      postgres:
+        pool-max: ${POSTGRES_POOL_MAX:15}
+        pool-min: ${POSTGRES_POOL_MIN:5}
+
+  ingest:
+    queue:
+      max-concurrent-workers: ${QUEUE_MAX_CONCURRENT_WORKERS:5}
+
+  runtime:
+    ollama:
+      inference-timeout-ms: ${OLLAMA_INFERENCE_TIMEOUT_MS:60000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: WARN
+    com.notarist: INFO
+    org.springframework.security: WARN
+    org.hibernate: WARN

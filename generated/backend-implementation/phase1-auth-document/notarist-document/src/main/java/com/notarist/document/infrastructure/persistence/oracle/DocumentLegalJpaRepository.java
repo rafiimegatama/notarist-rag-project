@@ -1,5 +1,9 @@
 package com.notarist.document.infrastructure.persistence.oracle;
 
+import com.notarist.core.domain.valueobject.ClassificationLevel;
+import com.notarist.core.domain.valueobject.JenisDokumen;
+import com.notarist.document.domain.model.DocumentStatus;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -7,6 +11,13 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * PHASE 6A.2-FIX: filter params updated to use typed enums now that entity
+ * fields are @Enumerated(STRING). String params for documentType, status, and
+ * allowedLevels replaced with JenisDokumen, DocumentStatus, and
+ * List<ClassificationLevel>. maxClearanceLevel changed from Integer to
+ * ClassificationLevel (IS NULL sentinel still works with null enum).
+ */
 public interface DocumentLegalJpaRepository extends JpaRepository<DocumentLegalJpaEntity, String> {
 
     Optional<DocumentLegalJpaEntity> findByChecksumSha256AndTenantId(
@@ -22,11 +33,11 @@ public interface DocumentLegalJpaRepository extends JpaRepository<DocumentLegalJ
             """)
     List<DocumentLegalJpaEntity> findByTenantIdWithFilters(
             @Param("tenantId") String tenantId,
-            @Param("documentType") String documentType,
-            @Param("status") String status,
-            @Param("maxClearanceLevel") Integer maxClearanceLevel,
-            @Param("allowedLevels") List<String> allowedLevels,
-            org.springframework.data.domain.Pageable pageable);
+            @Param("documentType") JenisDokumen documentType,
+            @Param("status") DocumentStatus status,
+            @Param("maxClearanceLevel") ClassificationLevel maxClearanceLevel,
+            @Param("allowedLevels") List<ClassificationLevel> allowedLevels,
+            Pageable pageable);
 
     @Query("""
             SELECT COUNT(d) FROM DocumentLegalJpaEntity d
@@ -37,8 +48,8 @@ public interface DocumentLegalJpaRepository extends JpaRepository<DocumentLegalJ
             """)
     long countByTenantIdWithFilters(
             @Param("tenantId") String tenantId,
-            @Param("documentType") String documentType,
-            @Param("status") String status,
-            @Param("maxClearanceLevel") Integer maxClearanceLevel,
-            @Param("allowedLevels") List<String> allowedLevels);
+            @Param("documentType") JenisDokumen documentType,
+            @Param("status") DocumentStatus status,
+            @Param("maxClearanceLevel") ClassificationLevel maxClearanceLevel,
+            @Param("allowedLevels") List<ClassificationLevel> allowedLevels);
 }

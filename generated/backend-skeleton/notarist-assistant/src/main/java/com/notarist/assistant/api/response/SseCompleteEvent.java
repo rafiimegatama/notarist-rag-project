@@ -15,4 +15,8 @@ public record SseCompleteEvent(
     List<String> warnings
 ) {
     public static final String EVENT_TYPE = "complete";
+
+    public SseCompleteEvent {
+        warnings = List.copyOf(warnings != null ? warnings : List.of());
+    }
 }

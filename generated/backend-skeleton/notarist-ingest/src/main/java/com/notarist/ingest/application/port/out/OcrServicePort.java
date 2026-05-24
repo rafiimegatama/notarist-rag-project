@@ -1,22 +1,19 @@
 package com.notarist.ingest.application.port.out;
 
-/** Port for PaddleOCR sidecar — :8081. Adapter enforces 120s timeout with 3x retry. */
+/**
+ * @deprecated PHASE 6A.2-FIX — OCR contract unified under core.OcrPort.
+ *
+ * Migration: replace all usages with:
+ *   com.notarist.core.port.ocr.OcrPort
+ *   com.notarist.core.domain.ocr.OcrConfig
+ *   com.notarist.core.domain.ocr.OcrResult
+ *
+ * OcrServiceAdapter now implements OcrPort (stub).
+ * PaddleOcrAdapter in notarist-runtime implements OcrPort (real).
+ *
+ * This interface is retained as a deprecated stub to avoid breaking
+ * any intermediate compilation step. Remove after all callers are migrated.
+ */
+@Deprecated(since = "6A.2-FIX", forRemoval = true)
 public interface OcrServicePort {
-
-    OcrResult extractText(String minioObjectKey, OcrConfig config);
-
-    record OcrConfig(int dpi, String language, boolean enhanceContrast) {
-        public static OcrConfig defaultIndonesia() {
-            return new OcrConfig(300, "id", true);
-        }
-    }
-
-    record OcrResult(
-        String ocrObjectKey,
-        int pageCount,
-        int extractedTextLength,
-        float confidenceAvg,
-        java.util.List<String> warnings,
-        long processingMs
-    ) {}
 }

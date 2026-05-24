@@ -17,8 +17,14 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
+/**
+ * PHASE 6A.2-FIX:
+ *   - findByTenantId / countByTenantId: pass enums directly (no .name()), use
+ *     List<ClassificationLevel> for allowedLevels, ClassificationLevel for maxClearance sentinel
+ *   - updateStatus: entity.setStatus() now takes DocumentStatus enum directly
+ *   - computeAllowedLevels: returns List<ClassificationLevel> (no Enum::name mapping)
+ */
 @Repository
 public class DocumentLegalRepositoryImpl implements DocumentLegalRepository {
 
@@ -54,32 +60,30 @@ public class DocumentLegalRepositoryImpl implements DocumentLegalRepository {
     @Override
     public List<DocumentLegal> findByTenantId(UUID tenantId, DocumentFilter filter, int page, int size) {
         vpdContextApplier.applyIfPresent(entityManager);
-        String docType = filter.documentType() != null ? filter.documentType().name() : null;
-        String status = filter.status() != null ? filter.status().name() : null;
+        JenisDokumen docType = filter.documentType();
+        DocumentStatus status = filter.status();
         ClassificationLevel maxClearance = filter.maxClearance();
-        List<String> allowedLevels = computeAllowedLevels(maxClearance);
-        Integer clearanceOrdinal = maxClearance != null ? maxClearance.ordinal() : null;
+        List<ClassificationLevel> allowedLevels = computeAllowedLevels(maxClearance);
 
         return jpaRepository.findByTenantIdWithFilters(
                         tenantId.toString(), docType, status,
-                        clearanceOrdinal, allowedLevels,
+                        maxClearance, allowedLevels,
                         PageRequest.of(page, size))
                 .stream()
                 .map(mapper::toDomain)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Override
     public long countByTenantId(UUID tenantId, DocumentFilter filter) {
         vpdContextApplier.applyIfPresent(entityManager);
-        String docType = filter.documentType() != null ? filter.documentType().name() : null;
-        String status = filter.status() != null ? filter.status().name() : null;
+        JenisDokumen docType = filter.documentType();
+        DocumentStatus status = filter.status();
         ClassificationLevel maxClearance = filter.maxClearance();
-        List<String> allowedLevels = computeAllowedLevels(maxClearance);
-        Integer clearanceOrdinal = maxClearance != null ? maxClearance.ordinal() : null;
+        List<ClassificationLevel> allowedLevels = computeAllowedLevels(maxClearance);
 
         return jpaRepository.countByTenantIdWithFilters(
-                tenantId.toString(), docType, status, clearanceOrdinal, allowedLevels);
+                tenantId.toString(), docType, status, maxClearance, allowedLevels);
     }
 
     @Override
@@ -92,16 +96,15 @@ public class DocumentLegalRepositoryImpl implements DocumentLegalRepository {
     public void updateStatus(DocumentId documentId, DocumentStatus status) {
         vpdContextApplier.applyIfPresent(entityManager);
         jpaRepository.findById(documentId.value().toString()).ifPresent(entity -> {
-            entity.setStatus(status.name());
+            entity.setStatus(status);
             jpaRepository.save(entity);
         });
     }
 
-    private List<String> computeAllowedLevels(ClassificationLevel maxClearance) {
+    private List<ClassificationLevel> computeAllowedLevels(ClassificationLevel maxClearance) {
         if (maxClearance == null) return List.of();
         return Arrays.stream(ClassificationLevel.values())
                 .filter(level -> !level.exceeds(maxClearance))
-                .map(Enum::name)
-                .collect(Collectors.toList());
+                .toList();
     }
 }

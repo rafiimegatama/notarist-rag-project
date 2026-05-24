@@ -3,10 +3,10 @@ package com.notarist.infra.postgres;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * PostgreSQL connection properties for the search module.
- * Bound from spring.datasource.postgres.* in application.yml.
+ * PostgreSQL connection properties.
+ * Bound from notarist.infra.datasource.postgres.* in application.yaml.
  */
-@ConfigurationProperties(prefix = "spring.datasource.postgres")
+@ConfigurationProperties(prefix = "notarist.infra.datasource.postgres")
 public record PostgresProperties(
         String url,
         String username,

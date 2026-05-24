@@ -11,6 +11,9 @@ dependencies {
     implementation(project(":notarist-assistant"))
     implementation(project(":notarist-regulation"))
     implementation(project(":notarist-audit"))
+    implementation(project(":notarist-infra"))
+    implementation(project(":notarist-runtime"))
+    implementation(project(":notarist-observability"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.webflux)

@@ -16,7 +16,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,metrics,prometheus
+        include: health,prometheus
   endpoint:
     health:
       show-details: when-authorized
@@ -25,7 +25,20 @@ management:
       prometheus:
         enabled: ${PROMETHEUS_ENABLED:true}
 
+# ─────────────────────────────────────────────────────────────────
+# NOTARIST — Canonical Configuration Namespace
+#
+# Root:  notarist.*
+# Tiers: security | infra | runtime | ingest | search | assistant | observability
+#
+# All @ConfigurationProperties and @Value MUST reference this namespace.
+# Do NOT use spring.minio, spring.qdrant, or spring.datasource.postgres
+# for application-defined config. Spring's own spring.datasource is ONLY
+# used for the primary (Oracle) JPA auto-configuration.
+# ─────────────────────────────────────────────────────────────────
+
 notarist:
+
   security:
     jwt:
       issuer: ${JWT_ISSUER:notarist-rag}
@@ -37,28 +50,37 @@ notarist:
       key: ${APP_ENCRYPTION_KEY}
       salt: ${APP_ENCRYPTION_SALT}
 
-  database:
-    oracle:
-      url: ${ORACLE_URL:jdbc:oracle:thin:@localhost:1521/NOTARISTDB}
-      username: ${ORACLE_USER:notarist_app}
-      password: ${ORACLE_PASSWORD}
-      pool-max: ${ORACLE_POOL_MAX:10}
-      pool-min: ${ORACLE_POOL_MIN:2}
-    postgres:
-      url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/notarist}
-      username: ${POSTGRES_USER:notarist_app}
-      password: ${POSTGRES_PASSWORD}
-      pool-max: ${POSTGRES_POOL_MAX:10}
-
-  storage:
-    qdrant:
-      url: ${QDRANT_URL:http://localhost:6333}
-      api-key: ${QDRANT_API_KEY:}
-      collection: ${QDRANT_COLLECTION:notarist_chunks}
+  infra:
+    datasource:
+      oracle:
+        url: ${ORACLE_URL:jdbc:oracle:thin:@localhost:1521/NOTARISTDB}
+        username: ${ORACLE_USER:notarist_app}
+        password: ${ORACLE_PASSWORD}
+        pool-max: ${ORACLE_POOL_MAX:20}
+        pool-min: ${ORACLE_POOL_MIN:5}
+      postgres:
+        url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/notarist}
+        username: ${POSTGRES_USER:notarist_app}
+        password: ${POSTGRES_PASSWORD}
+        pool-max: ${POSTGRES_POOL_MAX:10}
+        pool-min: ${POSTGRES_POOL_MIN:2}
+        driver-class-name: org.postgresql.Driver
+        connection-timeout-ms: ${POSTGRES_CONNECT_TIMEOUT_MS:5000}
+        idle-timeout-ms: ${POSTGRES_IDLE_TIMEOUT_MS:600000}
+        max-lifetime-ms: ${POSTGRES_MAX_LIFETIME_MS:1800000}
+        keepalive-time-ms: ${POSTGRES_KEEPALIVE_MS:60000}
+        pool-name: notarist-postgres-pool
+        schema: public
     minio:
       endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
-      access-key: ${MINIO_ACCESS_KEY:minioadmin}
-      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      access-key: ${MINIO_ACCESS_KEY}
+      secret-key: ${MINIO_SECRET_KEY}
+      default-bucket: ${MINIO_DEFAULT_BUCKET:notarist-documents}
+      secure: false
+      connect-timeout-ms: ${MINIO_CONNECT_TIMEOUT_MS:5000}
+      read-timeout-ms: ${MINIO_READ_TIMEOUT_MS:30000}
+      write-timeout-ms: ${MINIO_WRITE_TIMEOUT_MS:120000}
+      max-retries: ${MINIO_MAX_RETRIES:3}
       upload-url-ttl-minutes: ${MINIO_UPLOAD_URL_TTL_MINUTES:15}
       buckets:
         raw: ${MINIO_BUCKET_RAW:notarist-raw}
@@ -66,52 +88,63 @@ notarist:
         processed: ${MINIO_BUCKET_PROCESSED:notarist-processed}
         chunk: ${MINIO_BUCKET_CHUNK:notarist-chunk}
         export: ${MINIO_BUCKET_EXPORT:notarist-export}
+    qdrant:
+      host: ${QDRANT_HOST:localhost}
+      port: ${QDRANT_PORT:6333}
+      grpc-port: ${QDRANT_GRPC_PORT:6334}
+      api-key: ${QDRANT_API_KEY:}
+      collection-name: ${QDRANT_COLLECTION:notarist_chunks}
+      connect-timeout-ms: ${QDRANT_CONNECT_TIMEOUT_MS:3000}
+      search-timeout-ms: ${QDRANT_SEARCH_TIMEOUT_MS:5000}
+      upsert-timeout-ms: ${QDRANT_UPSERT_TIMEOUT_MS:10000}
+      max-retries: ${QDRANT_MAX_RETRIES:3}
+      default-min-score: ${QDRANT_DEFAULT_MIN_SCORE:0.60}
 
-  ingestion:
+  runtime:
+    ocr:
+      base-url: ${OCR_BASE_URL:http://localhost:8081}
+      timeout-ms: ${OCR_TIMEOUT_MS:30000}
+    embedding:
+      base-url: ${EMBEDDING_BASE_URL:http://localhost:8084}
+      timeout-ms: ${EMBEDDING_TIMEOUT_MS:15000}
+    reranker:
+      base-url: ${RERANKER_BASE_URL:http://localhost:8083}
+      timeout-ms: ${RERANKER_TIMEOUT_MS:15000}
+    ner:
+      base-url: ${NER_BASE_URL:http://localhost:8082}
+      timeout-ms: ${NER_TIMEOUT_MS:30000}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model: ${OLLAMA_MODEL:notarist-llm-7b}
+      inference-timeout-ms: ${OLLAMA_INFERENCE_TIMEOUT_MS:60000}
+      stream: true
+      max-tokens: 2048
+
+  ingest:
     queue:
       poll-interval-ms: ${QUEUE_POLL_INTERVAL_MS:2000}
       max-concurrent-workers: ${QUEUE_MAX_CONCURRENT_WORKERS:3}
       lock-timeout-ms: ${QUEUE_LOCK_TIMEOUT_MS:300000}
       max-retry-attempts: ${QUEUE_MAX_RETRY_ATTEMPTS:3}
+    scheduler:
+      thread-pool-size: ${INGEST_SCHEDULER_POOL_SIZE:4}
 
   search:
-    qdrant:
-      top-k-semantic: 20
-    bm25:
-      top-k-keyword: 20
-    rrf:
-      k: 60
-    reranker:
-      top-k-final: 5
+    top-k-semantic: ${SEARCH_TOP_K_SEMANTIC:20}
+    top-k-keyword: ${SEARCH_TOP_K_KEYWORD:20}
+    rrf-k: ${SEARCH_RRF_K:60}
+    reranker-top-k: ${SEARCH_RERANKER_TOP_K:5}
 
-  ai:
-    ollama:
-      model: ${OLLAMA_MODEL:notarist-llm-7b}
-      stream: true
-      max-tokens: 2048
+  assistant:
     hallucination-guard:
-      enabled: true
-      min-citation-count: 1
-
-  sidecar:
-    ocr:
-      base-url: ${OCR_BASE_URL:http://localhost:8081}
-      timeout-ms: ${OCR_TIMEOUT_MS:120000}
-    ner:
-      base-url: ${NER_BASE_URL:http://localhost:8082}
-      timeout-ms: ${NER_TIMEOUT_MS:30000}
-    reranker:
-      base-url: ${RERANKER_BASE_URL:http://localhost:8083}
-      timeout-ms: ${RERANKER_TIMEOUT_MS:15000}
-    ollama:
-      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-      timeout-ms: ${OLLAMA_TIMEOUT_MS:120000}
+      enabled: ${HALLUCINATION_GUARD_ENABLED:true}
+      min-citation-count: ${MIN_CITATION_COUNT:1}
 
   observability:
     correlation-id-header: X-Correlation-ID
     trace-id-header: X-Trace-ID
     metrics:
-      enabled: true
+      enabled: ${METRICS_ENABLED:true}
 
 logging:
   pattern:

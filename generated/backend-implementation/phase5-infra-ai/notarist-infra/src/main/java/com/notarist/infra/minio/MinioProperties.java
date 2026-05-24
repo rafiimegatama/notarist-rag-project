@@ -4,9 +4,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * MinIO connection properties.
- * Bound from spring.minio.* in application.yml.
+ * Bound from notarist.infra.minio.* in application.yaml.
  */
-@ConfigurationProperties(prefix = "spring.minio")
+@ConfigurationProperties(prefix = "notarist.infra.minio")
 public record MinioProperties(
         String endpoint,
         String accessKey,

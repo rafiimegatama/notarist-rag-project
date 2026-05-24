@@ -22,6 +22,6 @@ public record EmbeddingCompletedEvent(
     @Override public String eventType() { return "embedding.completed"; }
     @Override public String publishedBy() { return "notarist-ingest"; }
 
-    public String embeddingModel() { return "bge-m3"; }
+    public String embeddingModel() { return com.notarist.core.domain.vector.EmbeddingContract.EMBEDDING_MODEL; }
     public int embeddingDimension() { return NotaristConstants.EMBEDDING_DIMENSION; }
 }

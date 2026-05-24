@@ -4,24 +4,24 @@ import com.notarist.core.domain.valueobject.DocumentId;
 import com.notarist.ingest.application.port.out.VectorIndexPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 /**
- * Stub adapter for Qdrant on configured URL.
- * No-ops all operations. Replace with real Qdrant client calls in Phase 2C.
+ * Stub adapter for Qdrant vector index.
+ * No-ops all operations for pipeline testing.
+ *
+ * PHASE 6A.2-FIX: @Component REMOVED.
+ * Production bean: QdrantIndexAdapter in notarist-infra.
+ * Test usage: declare as @Bean in @TestConfiguration.
  */
-@Component
 public class VectorIndexAdapter implements VectorIndexPort {
 
     private static final Logger log = LoggerFactory.getLogger(VectorIndexAdapter.class);
 
     private final String qdrantUrl;
 
-    public VectorIndexAdapter(
-            @Value("${notarist.qdrant.url:http://localhost:6333}") String qdrantUrl) {
+    public VectorIndexAdapter(String qdrantUrl) {
         this.qdrantUrl = qdrantUrl;
     }
 

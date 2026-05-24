@@ -50,7 +50,7 @@ public class AssistantController {
             @RequestHeader("X-Tenant-Id") UUID tenantId,
             @RequestHeader("X-User-Id") UUID userId,
             @RequestHeader(value = "X-Session-Id", required = false) UUID sessionId,
-            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationIdHeader) {
+            @RequestHeader(value = "X-Correlation-ID", required = false) String correlationIdHeader) {
 
         CorrelationId correlationId = resolveCorrelationId(correlationIdHeader);
         AssistantCommand command = buildCommand(request, tenantId, userId, sessionId);
@@ -68,7 +68,7 @@ public class AssistantController {
     /**
      * POST /api/v1/assistant/ask/stream
      * SSE streaming — emits ANSWER_TOKEN, CITATION, CONFIDENCE, WARNING, FOLLOW_UP, DONE events.
-     * Timeout: 60 seconds per request.
+     * Emitter timeout (90s) exceeds Ollama inference timeout (60s) to guarantee DONE delivery.
      */
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter askStream(
@@ -76,9 +76,9 @@ public class AssistantController {
             @RequestHeader("X-Tenant-Id") UUID tenantId,
             @RequestHeader("X-User-Id") UUID userId,
             @RequestHeader(value = "X-Session-Id", required = false) UUID sessionId,
-            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationIdHeader) {
+            @RequestHeader(value = "X-Correlation-ID", required = false) String correlationIdHeader) {
 
-        SseEmitter emitter = new SseEmitter(60_000L);
+        SseEmitter emitter = new SseEmitter(90_000L);
         AssistantCommand command = buildCommand(request, tenantId, userId, sessionId);
 
         log.info("Assistant stream tenantId={} queryId={}", tenantId, command.queryId());

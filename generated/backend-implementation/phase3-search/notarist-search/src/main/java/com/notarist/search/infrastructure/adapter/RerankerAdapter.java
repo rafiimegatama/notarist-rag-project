@@ -3,17 +3,17 @@ package com.notarist.search.infrastructure.adapter;
 import com.notarist.search.application.port.out.RerankerPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
  * Cross-encoder reranker stub — Phase 3.
  * Returns fixed score 0.5 for every candidate (identity passthrough).
- * Real cross-encoder HTTP integration deferred to Phase 4.
+ *
+ * PHASE 6A.2-FIX: @Component REMOVED.
+ * Production bean: RerankerRuntimeWorker in notarist-runtime.
+ * Test usage: declare as @Bean in @TestConfiguration.
  */
-@Component
 public class RerankerAdapter implements RerankerPort {
 
     private static final Logger log = LoggerFactory.getLogger(RerankerAdapter.class);

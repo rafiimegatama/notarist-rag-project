@@ -1,8 +1,8 @@
 package com.notarist.runtime.ocr;
 
-import com.notarist.infra.ocr.OcrConfidencePolicy;
-import com.notarist.infra.ocr.OcrReviewStatus;
-import com.notarist.ingest.application.port.out.OcrServicePort;
+import com.notarist.core.domain.ocr.OcrConfig;
+import com.notarist.core.domain.ocr.OcrResult;
+import com.notarist.core.port.ocr.OcrPort;
 import com.notarist.runtime.degradation.RuntimeDegradationManager;
 import com.notarist.runtime.metrics.RuntimeMetricsRegistry;
 import com.notarist.runtime.model.ModelProvider;
@@ -10,14 +10,14 @@ import com.notarist.runtime.model.ModelRegistry;
 import com.notarist.runtime.timeout.TimeoutCancellationOrchestrator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 
@@ -38,7 +38,7 @@ import java.util.Map;
  *     (ingestion job moves to FAILED state, not DLQ, so retry is possible)
  */
 @Component
-public class PaddleOcrAdapter implements OcrServicePort {
+public class PaddleOcrAdapter implements OcrPort {
 
     private static final Logger log = LoggerFactory.getLogger(PaddleOcrAdapter.class);
 

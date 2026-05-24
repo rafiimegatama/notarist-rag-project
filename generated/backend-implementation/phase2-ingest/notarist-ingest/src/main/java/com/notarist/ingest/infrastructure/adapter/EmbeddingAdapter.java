@@ -4,25 +4,25 @@ import com.notarist.core.util.NotaristConstants;
 import com.notarist.ingest.application.port.out.EmbeddingPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Stub adapter for bge-m3 via Ollama on :11434.
- * Returns zero-vector stubs (1024-dim). Replace with real Ollama HTTP call in Phase 2C.
+ * Stub adapter for bge-m3 embedding.
+ * Returns zero-vector stubs (1024-dim) for pipeline testing.
+ *
+ * PHASE 6A.2-FIX: @Component REMOVED.
+ * Production bean: EmbeddingRuntimeWorker in notarist-runtime.
+ * Test usage: declare as @Bean in @TestConfiguration.
  */
-@Component
 public class EmbeddingAdapter implements EmbeddingPort {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddingAdapter.class);
 
     private final String ollamaUrl;
 
-    public EmbeddingAdapter(
-            @Value("${notarist.ingest.embedding.ollama-url:http://localhost:11434}") String ollamaUrl) {
+    public EmbeddingAdapter(String ollamaUrl) {
         this.ollamaUrl = ollamaUrl;
     }
 

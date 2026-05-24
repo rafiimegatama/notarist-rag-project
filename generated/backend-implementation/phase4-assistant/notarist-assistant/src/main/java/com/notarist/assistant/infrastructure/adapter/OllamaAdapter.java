@@ -6,21 +6,18 @@ import com.notarist.assistant.domain.model.LlmResponse;
 import com.notarist.assistant.domain.model.LlmStreamChunk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-
 import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
  * Ollama LLM adapter stub — Phase 4.
+ * Returns a deterministic stub response in Indonesian for pipeline testing.
+ * isAvailable() returns false — callers handle LLM-unavailable paths.
  *
- * Real Ollama HTTP inference (POST /api/chat + streaming) deferred to Phase 5.
- * Returns a deterministic stub response in Indonesian so the rest of the pipeline
- * (HallucinationGuard, ResponseStreamer, CitationSync) can be validated end-to-end.
- *
- * isAvailable() returns false — callers must handle LLM-unavailable paths gracefully.
+ * PHASE 6A.2-FIX: @Component REMOVED.
+ * Production bean: OllamaRuntimeAdapter in notarist-runtime.
+ * Test usage: declare as @Bean in @TestConfiguration.
  */
-@Component
 public class OllamaAdapter implements LlmPort {
 
     private static final Logger log = LoggerFactory.getLogger(OllamaAdapter.class);

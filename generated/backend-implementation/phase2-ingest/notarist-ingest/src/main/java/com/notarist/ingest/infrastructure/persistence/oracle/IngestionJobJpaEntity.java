@@ -1,8 +1,20 @@
 package com.notarist.ingest.infrastructure.persistence.oracle;
 
+import com.notarist.core.domain.valueobject.ClassificationLevel;
+import com.notarist.core.domain.valueobject.JenisDokumen;
+import com.notarist.ingest.domain.model.JobStatus;
+import com.notarist.ingest.domain.model.PipelineStage;
+import com.notarist.ingest.domain.model.PipelineStatus;
 import jakarta.persistence.*;
 import java.time.Instant;
 
+/**
+ * PHASE 6A.2-FIX: enum fields added @Enumerated(EnumType.STRING).
+ * pipelineStatus → PipelineStatus, overallStatus → JobStatus,
+ * classificationLevel → ClassificationLevel, documentType → JenisDokumen.
+ * failureStage remains String (PipelineStage name, nullable).
+ * IngestionJobRepositoryImpl updated: remove .name() in toEntity(), remove .valueOf() in toDomain().
+ */
 @Entity
 @Table(name = "INGESTION_JOB", schema = "NOTARIST", indexes = {
         @Index(name = "IDX_INGEST_JOB_JOB_ID",        columnList = "JOB_ID"),
@@ -28,23 +40,27 @@ public class IngestionJobJpaEntity {
     @Column(name = "UPLOADED_BY", length = 36, nullable = false)
     private String uploadedBy;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "DOCUMENT_TYPE", length = 50, nullable = false)
-    private String documentType;
+    private JenisDokumen documentType;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "CLASSIFICATION_LEVEL", length = 50, nullable = false)
-    private String classificationLevel;
+    private ClassificationLevel classificationLevel;
 
     @Column(name = "ORIGINAL_FILENAME", length = 500, nullable = false)
     private String originalFilename;
 
-    @Column(name = "CHECKSUM_SHA256", length = 64, nullable = false)
+    @Column(name = "CHECKSUM_SHA256", length = 64, nullable = false, updatable = false)
     private String checksumSha256;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "PIPELINE_STATUS", length = 50, nullable = false)
-    private String pipelineStatus;
+    private PipelineStatus pipelineStatus;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "OVERALL_STATUS", length = 50, nullable = false)
-    private String overallStatus;
+    private JobStatus overallStatus;
 
     @Column(name = "FAILURE_STAGE", length = 50)
     private String failureStage;
@@ -81,9 +97,9 @@ public class IngestionJobJpaEntity {
 
     public IngestionJobJpaEntity(
             String ingestionId, String jobId, String documentId, String tenantId,
-            String uploadedBy, String documentType, String classificationLevel,
-            String originalFilename, String checksumSha256, String pipelineStatus,
-            String overallStatus, String failureStage, int retryCount,
+            String uploadedBy, JenisDokumen documentType, ClassificationLevel classificationLevel,
+            String originalFilename, String checksumSha256, PipelineStatus pipelineStatus,
+            JobStatus overallStatus, String failureStage, int retryCount,
             String lastErrorCode, String lastErrorHash, Instant nextRetryAt,
             String deadLetterReason, String stageHistoryJson,
             Instant createdAt, Instant updatedAt, Instant completedAt) {
@@ -115,12 +131,12 @@ public class IngestionJobJpaEntity {
     public String getDocumentId() { return documentId; }
     public String getTenantId() { return tenantId; }
     public String getUploadedBy() { return uploadedBy; }
-    public String getDocumentType() { return documentType; }
-    public String getClassificationLevel() { return classificationLevel; }
+    public JenisDokumen getDocumentType() { return documentType; }
+    public ClassificationLevel getClassificationLevel() { return classificationLevel; }
     public String getOriginalFilename() { return originalFilename; }
     public String getChecksumSha256() { return checksumSha256; }
-    public String getPipelineStatus() { return pipelineStatus; }
-    public String getOverallStatus() { return overallStatus; }
+    public PipelineStatus getPipelineStatus() { return pipelineStatus; }
+    public JobStatus getOverallStatus() { return overallStatus; }
     public String getFailureStage() { return failureStage; }
     public int getRetryCount() { return retryCount; }
     public String getLastErrorCode() { return lastErrorCode; }
@@ -132,8 +148,8 @@ public class IngestionJobJpaEntity {
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getCompletedAt() { return completedAt; }
 
-    public void setPipelineStatus(String pipelineStatus) { this.pipelineStatus = pipelineStatus; }
-    public void setOverallStatus(String overallStatus) { this.overallStatus = overallStatus; }
+    public void setPipelineStatus(PipelineStatus pipelineStatus) { this.pipelineStatus = pipelineStatus; }
+    public void setOverallStatus(JobStatus overallStatus) { this.overallStatus = overallStatus; }
     public void setFailureStage(String failureStage) { this.failureStage = failureStage; }
     public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
     public void setLastErrorCode(String lastErrorCode) { this.lastErrorCode = lastErrorCode; }

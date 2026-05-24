@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────
+# application-dev.yaml — DEVELOPMENT SERVER OVERRIDES
+#
+# Activated by: SPRING_PROFILES_ACTIVE=dev
+# Purpose: shared dev server; realistic config; debug logging allowed
+#
+# Required env vars (no defaults here — must be set on dev server):
+#   ORACLE_PASSWORD, POSTGRES_PASSWORD, MINIO_ACCESS_KEY, MINIO_SECRET_KEY,
+#   APP_ENCRYPTION_KEY, APP_ENCRYPTION_SALT
+# ─────────────────────────────────────────────────────────────────
+
+notarist:
+  infra:
+    datasource:
+      oracle:
+        pool-max: 10
+        pool-min: 3
+      postgres:
+        pool-max: 8
+        pool-min: 2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+
+logging:
+  level:
+    root: INFO
+    com.notarist: DEBUG
+    org.springframework.security: INFO

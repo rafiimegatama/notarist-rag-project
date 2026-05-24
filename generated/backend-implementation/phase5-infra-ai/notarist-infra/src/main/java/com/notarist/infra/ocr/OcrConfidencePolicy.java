@@ -1,5 +1,9 @@
 package com.notarist.infra.ocr;
 
+// MIGRATED to com.notarist.core.domain.ocr.OcrConfidencePolicy (Phase 6A.1 boundary fix).
+// This class is retained as a deprecated wrapper.
+// All external consumers must import from notarist-core.
+
 /**
  * OCR confidence policy for the legal document domain.
  *

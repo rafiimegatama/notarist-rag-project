@@ -7,10 +7,14 @@ import com.notarist.runtime.metrics.RuntimeMetricsRegistry;
 import com.notarist.runtime.model.ModelProvider;
 import com.notarist.runtime.model.ModelRegistry;
 import com.notarist.runtime.timeout.TimeoutCancellationOrchestrator;
-import com.notarist.infra.qdrant.QdrantVectorPayload;
+import com.notarist.core.domain.vector.EmbeddingContract;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
@@ -130,9 +134,9 @@ public class EmbeddingRuntimeWorker {
         if (result == null) throw new EmbeddingRuntimeException("Embedding service returned null", null);
 
         int dimension = ((Number) result.getOrDefault("dimension", 0)).intValue();
-        if (dimension != QdrantVectorPayload.REQUIRED_DIMENSION) {
+        if (dimension != EmbeddingContract.REQUIRED_DIMENSION) {
             throw new EmbeddingRuntimeException(
-                    "Embedding dimension mismatch: expected=" + QdrantVectorPayload.REQUIRED_DIMENSION +
+                    "Embedding dimension mismatch: expected=" + EmbeddingContract.REQUIRED_DIMENSION +
                     " actual=" + dimension + " batchId=" + batchId, null);
         }
 

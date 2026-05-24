@@ -1,35 +1,31 @@
 package com.notarist.ingest.infrastructure.adapter;
 
-import com.notarist.ingest.application.port.out.OcrServicePort;
-import com.notarist.ingest.domain.exception.IngestionStageException;
-import com.notarist.ingest.domain.model.PipelineStatus;
+import com.notarist.core.domain.ocr.OcrConfig;
+import com.notarist.core.domain.ocr.OcrResult;
+import com.notarist.core.port.ocr.OcrPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 import java.util.List;
 
 /**
- * Stub adapter for PaddleOCR sidecar on :8081.
- * Returns a deterministic stub result. Replace with real HTTP call in Phase 2C.
+ * Stub implementation of OcrPort for ingest pipeline testing.
+ *
+ * PHASE 6A.2-FIX:
+ *   - Migrated from OcrServicePort to core.OcrPort
+ *   - @Component REMOVED: PaddleOcrAdapter in notarist-runtime is the production bean
+ *   - For test-only wiring: declare as @Bean in a @TestConfiguration class
+ *
+ * Boundary: notarist-ingest depends on notarist-core (OcrPort, OcrConfig, OcrResult).
+ * No dependency on notarist-runtime needed here.
  */
-@Component
-public class OcrServiceAdapter implements OcrServicePort {
+public class OcrServiceAdapter implements OcrPort {
 
     private static final Logger log = LoggerFactory.getLogger(OcrServiceAdapter.class);
 
-    private final String sidecarUrl;
-
-    public OcrServiceAdapter(
-            @Value("${notarist.ingest.ocr.sidecar-url:http://localhost:8081}") String sidecarUrl) {
-        this.sidecarUrl = sidecarUrl;
-    }
-
     @Override
     public OcrResult extractText(String minioObjectKey, OcrConfig config) {
-        log.info("[STUB] OCR extractText objectKey={} sidecar={}", minioObjectKey, sidecarUrl);
+        log.info("[STUB] OCR extractText objectKey={} lang={}", minioObjectKey, config.language());
 
         return new OcrResult(
                 minioObjectKey.replace("notarist-raw/", "notarist-ocr/") + ".txt",

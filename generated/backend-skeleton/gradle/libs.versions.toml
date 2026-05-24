@@ -1,0 +1,73 @@
+[versions]
+springBoot                 = "3.2.5"
+springDependencyManagement = "1.1.5"
+openapiGenerator           = "7.5.0"
+ojdbc11                    = "23.3.0.23.09"
+postgresql                 = "42.7.3"
+qdrantClient               = "1.9.1"
+minioClient                = "8.5.10"
+jjwt                       = "0.12.5"
+liquibase                  = "4.27.0"
+flyway                     = "10.12.0"
+mapstruct                  = "1.5.5.Final"
+jacksonDatabind            = "2.17.1"
+logbackJson                = "0.1.5"
+opentelemetrySdk           = "2.4.0"
+micrometerPrometheus       = "1.12.5"
+mockito                    = "5.11.0"
+testcontainers             = "1.19.8"
+archunit                   = "1.3.0"
+reactor                    = "3.6.5"
+
+[libraries]
+# Spring Boot Starters
+spring-boot-starter-web          = { module = "org.springframework.boot:spring-boot-starter-web" }
+spring-boot-starter-security     = { module = "org.springframework.boot:spring-boot-starter-security" }
+spring-boot-starter-data-jpa     = { module = "org.springframework.boot:spring-boot-starter-data-jpa" }
+spring-boot-starter-jdbc         = { module = "org.springframework.boot:spring-boot-starter-jdbc" }
+spring-boot-starter-webflux      = { module = "org.springframework.boot:spring-boot-starter-webflux" }
+spring-boot-starter-actuator     = { module = "org.springframework.boot:spring-boot-starter-actuator" }
+spring-boot-starter-validation   = { module = "org.springframework.boot:spring-boot-starter-validation" }
+spring-boot-starter-test         = { module = "org.springframework.boot:spring-boot-starter-test" }
+
+# Database
+ojdbc11                   = { module = "com.oracle.database.jdbc:ojdbc11", version.ref = "ojdbc11" }
+postgresql                = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+liquibase-core            = { module = "org.liquibase:liquibase-core", version.ref = "liquibase" }
+flyway-core               = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
+flyway-postgresql         = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+
+# Vector & Object Storage
+qdrant-client             = { module = "io.qdrant:client", version.ref = "qdrantClient" }
+minio                     = { module = "io.minio:minio", version.ref = "minioClient" }
+
+# Security
+jjwt-api                  = { module = "io.jsonwebtoken:jjwt-api", version.ref = "jjwt" }
+jjwt-impl                 = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
+jjwt-jackson              = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
+
+# Observability
+micrometer-prometheus     = { module = "io.micrometer:micrometer-registry-prometheus", version.ref = "micrometerPrometheus" }
+opentelemetry-sdk         = { module = "io.opentelemetry:opentelemetry-sdk", version.ref = "opentelemetrySdk" }
+
+# Reactive
+reactor-core              = { module = "io.projectreactor:reactor-core", version.ref = "reactor" }
+
+# Utilities
+mapstruct                 = { module = "org.mapstruct:mapstruct", version.ref = "mapstruct" }
+mapstruct-processor       = { module = "org.mapstruct:mapstruct-processor", version.ref = "mapstruct" }
+logback-json-classic      = { module = "ch.qos.logback.contrib:logback-json-classic", version.ref = "logbackJson" }
+logback-jackson           = { module = "ch.qos.logback.contrib:logback-jackson", version.ref = "logbackJson" }
+jackson-databind          = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jacksonDatabind" }
+jackson-datatype-jsr310   = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310" }
+
+# Testing
+testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+testcontainers-oracle-xe  = { module = "org.testcontainers:oracle-xe", version.ref = "testcontainers" }
+archunit-junit5           = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+mockito-core              = { module = "org.mockito:mockito-core", version.ref = "mockito" }
+
+[plugins]
+spring-boot               = { id = "org.springframework.boot", version.ref = "springBoot" }
+spring-dependency-mgmt    = { id = "io.spring.dependency-management", version.ref = "springDependencyManagement" }
+openapi-generator         = { id = "org.openapi.generator", version.ref = "openapiGenerator" }

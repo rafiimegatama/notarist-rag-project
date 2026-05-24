@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- ============================================================
+         Changeset 001: Create NOTARIST schema users
+         ============================================================ -->
+    <changeSet id="001-create-schemas" author="notarist-dev" runOnChange="false">
+        <sql>
+            BEGIN
+                EXECUTE IMMEDIATE 'CREATE USER NOTARIST IDENTIFIED EXTERNALLY AS NOTARIST DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP QUOTA UNLIMITED ON USERS';
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF SQLCODE != -1920 THEN RAISE; END IF;
+            END;
+        </sql>
+        <sql>
+            BEGIN
+                EXECUTE IMMEDIATE 'CREATE USER NOTARIST_STG IDENTIFIED EXTERNALLY AS NOTARIST_STG DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP QUOTA UNLIMITED ON USERS';
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF SQLCODE != -1920 THEN RAISE; END IF;
+            END;
+        </sql>
+        <sql>
+            BEGIN
+                EXECUTE IMMEDIATE 'CREATE USER NOTARIST_SEC IDENTIFIED EXTERNALLY AS NOTARIST_SEC DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP QUOTA UNLIMITED ON USERS';
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF SQLCODE != -1920 THEN RAISE; END IF;
+            END;
+        </sql>
+    </changeSet>
+
+    <!-- ============================================================
+         Changeset 002: Create Oracle Application Context for VPD
+         ============================================================ -->
+    <changeSet id="002-create-vpd-context" author="notarist-dev" runOnChange="false">
+        <sql splitStatements="false">
+            BEGIN
+                EXECUTE IMMEDIATE '
+                    CREATE OR REPLACE CONTEXT NOTARIST_CTX USING NOTARIST.SET_NOTARIST_CTX EXTERNALLY INITIALIZED
+                ';
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+        </sql>
+    </changeSet>
+
+    <!-- ============================================================
+         Changeset 003: NOTARIST_USER table
+         ============================================================ -->
+    <changeSet id="003-create-notarist-user" author="notarist-dev">
+        <createTable tableName="NOTARIST_USER" schemaName="NOTARIST"
+                     remarks="Platform user accounts — authentication identity">
+            <column name="USER_ID" type="VARCHAR2(36)" remarks="UUID primary key">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="TENANT_ID" type="VARCHAR2(36)" remarks="Tenant isolation identifier">
+                <constraints nullable="false"/>
+            </column>
+            <column name="USERNAME" type="VARCHAR2(100)" remarks="Unique login handle per platform">
+                <constraints nullable="false" unique="true" uniqueConstraintName="UQ_NOTARIST_USER_USERNAME"/>
+            </column>
+            <column name="PASSWORD_HASH" type="VARCHAR2(255)" remarks="BCrypt hash, cost=12">
+                <constraints nullable="false"/>
+            </column>
+            <column name="FULL_NAME" type="VARCHAR2(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="ACTIVE" type="NUMBER(1)" defaultValueNumeric="1" remarks="0=disabled, 1=active">
+                <constraints nullable="false"/>
+            </column>
+            <column name="LAST_LOGIN_AT" type="TIMESTAMP"/>
+            <column name="CREATED_AT" type="TIMESTAMP" defaultValueComputed="SYSTIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <createIndex indexName="IDX_NOTARIST_USER_TENANT" tableName="NOTARIST_USER" schemaName="NOTARIST">
+            <column name="TENANT_ID"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ============================================================
+         Changeset 004: USER_ROLE_MAP sequence and table
+         ============================================================ -->
+    <changeSet id="004-create-user-role-map" author="notarist-dev">
+        <sql>CREATE SEQUENCE NOTARIST.USER_ROLE_MAP_SEQ START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE</sql>
+
+        <createTable tableName="USER_ROLE_MAP" schemaName="NOTARIST"
+                     remarks="Maps users to their assigned roles">
+            <column name="ROLE_MAP_ID" type="NUMBER(19)" remarks="Sequence PK">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="USER_ID" type="VARCHAR2(36)">
+                <constraints nullable="false"
+                             foreignKeyName="FK_ROLE_MAP_USER"
+                             references="NOTARIST.NOTARIST_USER(USER_ID)"/>
+            </column>
+            <column name="ROLE_CODE" type="VARCHAR2(50)" remarks="STAFF|NOTARIS|PPAT_OFFICER|PIMPINAN|ADMIN">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addUniqueConstraint tableName="USER_ROLE_MAP" schemaName="NOTARIST"
+                             columnNames="USER_ID, ROLE_CODE"
+                             constraintName="UQ_USER_ROLE_MAP_UNIQUE"/>
+
+        <createIndex indexName="IDX_USER_ROLE_MAP_USER" tableName="USER_ROLE_MAP" schemaName="NOTARIST">
+            <column name="USER_ID"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ============================================================
+         Changeset 005: DOKUMEN_LEGAL table
+         ============================================================ -->
+    <changeSet id="005-create-dokumen-legal" author="notarist-dev">
+        <createTable tableName="DOKUMEN_LEGAL" schemaName="NOTARIST"
+                     remarks="Legal document aggregate root — akta, regulasi, SOP">
+            <column name="DOCUMENT_ID" type="VARCHAR2(36)" remarks="UUID primary key">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="DOCUMENT_TITLE" type="VARCHAR2(500)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DOCUMENT_TYPE" type="VARCHAR2(50)" remarks="AKTA|REGULASI|SOP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="JENIS_AKTA" type="VARCHAR2(50)" remarks="APHT|SKMHT|FIDUSIA|ROYA|AJB|... nullable for REGULASI/SOP"/>
+            <column name="NOMOR_AKTA" type="VARCHAR2(100)" remarks="Format: {nomor}/{bulan}/{tahun}"/>
+            <column name="TANGGAL_AKTA" type="DATE"/>
+            <column name="CLASSIFICATION_LEVEL" type="VARCHAR2(50)" remarks="PUBLIC|INTERNAL|CONFIDENTIAL|STRICTLY_CONFIDENTIAL">
+                <constraints nullable="false"/>
+            </column>
+            <column name="STATUS" type="VARCHAR2(50)" remarks="See DocumentStatus enum">
+                <constraints nullable="false"/>
+            </column>
+            <column name="MINIO_OBJECT_KEY" type="VARCHAR2(500)" remarks="MinIO object path in notarist-raw bucket">
+                <constraints nullable="false"/>
+            </column>
+            <column name="CHECKSUM_SHA256" type="VARCHAR2(64)" remarks="SHA-256 hex — duplicate detection">
+                <constraints nullable="false"/>
+            </column>
+            <column name="FILE_SIZE_BYTES" type="NUMBER(19)"/>
+            <column name="MIME_TYPE" type="VARCHAR2(100)"/>
+            <column name="NOTARIS_ID" type="VARCHAR2(36)" remarks="FK to PERSON_MASTER — signing notaris"/>
+            <column name="TENANT_ID" type="VARCHAR2(36)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="UPLOADED_BY" type="VARCHAR2(36)" remarks="FK to NOTARIST_USER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="PAGE_COUNT" type="NUMBER(5)"/>
+            <column name="VERSION_NUMBER" type="NUMBER(3)" defaultValueNumeric="1">
+                <constraints nullable="false"/>
+            </column>
+            <column name="CREATED_AT" type="TIMESTAMP" defaultValueComputed="SYSTIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="INDEXED_AT" type="TIMESTAMP"/>
+        </createTable>
+
+        <addUniqueConstraint tableName="DOKUMEN_LEGAL" schemaName="NOTARIST"
+                             columnNames="CHECKSUM_SHA256, TENANT_ID"
+                             constraintName="UQ_DOKUMEN_CHECKSUM_TENANT"/>
+
+        <createIndex indexName="IDX_DOKUMEN_LEGAL_TENANT" tableName="DOKUMEN_LEGAL" schemaName="NOTARIST">
+            <column name="TENANT_ID"/>
+        </createIndex>
+        <createIndex indexName="IDX_DOKUMEN_LEGAL_STATUS" tableName="DOKUMEN_LEGAL" schemaName="NOTARIST">
+            <column name="STATUS"/>
+            <column name="TENANT_ID"/>
+        </createIndex>
+        <createIndex indexName="IDX_DOKUMEN_LEGAL_TYPE" tableName="DOKUMEN_LEGAL" schemaName="NOTARIST">
+            <column name="DOCUMENT_TYPE"/>
+            <column name="TENANT_ID"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- ============================================================
+         Changeset 006: AUDIT_TRAIL table in NOTARIST_SEC schema
+         ============================================================ -->
+    <changeSet id="006-create-audit-trail" author="notarist-dev">
+        <createTable tableName="AUDIT_TRAIL" schemaName="NOTARIST_SEC"
+                     remarks="Append-only audit log — 7-year retention. No UPDATE or DELETE allowed.">
+            <column name="AUDIT_ID" type="VARCHAR2(36)" remarks="UUID primary key">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="CORRELATION_ID" type="VARCHAR2(36)"/>
+            <column name="EVENT_TYPE" type="VARCHAR2(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="EVENT_CATEGORY" type="VARCHAR2(50)"/>
+            <column name="SUBJECT_TYPE" type="VARCHAR2(50)"/>
+            <column name="SUBJECT_ID" type="VARCHAR2(36)"/>
+            <column name="ACTOR_USER_ID" type="VARCHAR2(36)"/>
+            <column name="ACTOR_ROLE" type="VARCHAR2(50)"/>
+            <column name="TENANT_ID" type="VARCHAR2(36)"/>
+            <column name="ACTION" type="VARCHAR2(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="OUTCOME" type="VARCHAR2(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="DETAIL_JSON" type="CLOB" remarks="JSON payload — additional context"/>
+            <column name="IP_ADDRESS" type="VARCHAR2(45)"/>
+            <column name="CREATED_AT" type="TIMESTAMP" defaultValueComputed="SYSTIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <createIndex indexName="IDX_AUDIT_TRAIL_TENANT_DATE"
+                     tableName="AUDIT_TRAIL" schemaName="NOTARIST_SEC">
+            <column name="TENANT_ID"/>
+            <column name="CREATED_AT"/>
+        </createIndex>
+        <createIndex indexName="IDX_AUDIT_TRAIL_EVENT_TYPE"
+                     tableName="AUDIT_TRAIL" schemaName="NOTARIST_SEC">
+            <column name="EVENT_TYPE"/>
+            <column name="CREATED_AT"/>
+        </createIndex>
+        <createIndex indexName="IDX_AUDIT_TRAIL_ACTOR"
+                     tableName="AUDIT_TRAIL" schemaName="NOTARIST_SEC">
+            <column name="ACTOR_USER_ID"/>
+            <column name="CREATED_AT"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

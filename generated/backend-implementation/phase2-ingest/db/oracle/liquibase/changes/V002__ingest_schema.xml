@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <!-- ============================================================
+         NOTARIST RAG Platform — Oracle 19C Ingest Schema
+         Liquibase V002 — Phase 2: Ingestion Pipeline
+         ============================================================ -->
+
+    <changeSet id="V002-01" author="notarist-ingest">
+        <comment>Create INGESTION_JOB table in NOTARIST schema</comment>
+
+        <createTable tableName="INGESTION_JOB" schemaName="NOTARIST">
+
+            <column name="INGESTION_ID" type="VARCHAR2(36)">
+                <constraints primaryKey="true" primaryKeyName="PK_INGESTION_JOB"
+                             nullable="false"/>
+            </column>
+
+            <column name="JOB_ID" type="VARCHAR2(36)">
+                <constraints nullable="false" unique="true"
+                             uniqueConstraintName="UQ_INGESTION_JOB_JOB_ID"/>
+            </column>
+
+            <column name="DOCUMENT_ID" type="VARCHAR2(36)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="TENANT_ID" type="VARCHAR2(36)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="UPLOADED_BY" type="VARCHAR2(36)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="DOCUMENT_TYPE" type="VARCHAR2(50)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="CLASSIFICATION_LEVEL" type="VARCHAR2(50)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="ORIGINAL_FILENAME" type="VARCHAR2(500)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="CHECKSUM_SHA256" type="VARCHAR2(64)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="PIPELINE_STATUS" type="VARCHAR2(50)" defaultValue="UPLOADED">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="OVERALL_STATUS" type="VARCHAR2(50)" defaultValue="PENDING">
+                <constraints nullable="false"/>
+            </column>
+
+            <!-- DLQ / retry tracking fields -->
+            <column name="FAILURE_STAGE" type="VARCHAR2(50)"/>
+            <column name="RETRY_COUNT" type="NUMBER(3)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="LAST_ERROR_CODE" type="VARCHAR2(100)"/>
+            <column name="LAST_ERROR_HASH" type="VARCHAR2(64)"/>
+            <column name="NEXT_RETRY_AT" type="TIMESTAMP"/>
+            <column name="DEAD_LETTER_REASON" type="VARCHAR2(1000)"/>
+
+            <!-- Stage audit CLOB — JSON array of StageRecord -->
+            <column name="STAGE_HISTORY" type="CLOB" defaultValue="[]">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="CREATED_AT" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="UPDATED_AT" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="COMPLETED_AT" type="TIMESTAMP"/>
+
+        </createTable>
+    </changeSet>
+
+    <changeSet id="V002-02" author="notarist-ingest">
+        <comment>Create indexes for INGESTION_JOB</comment>
+
+        <createIndex indexName="IDX_INGEST_JOB_TENANT_STATUS"
+                     tableName="INGESTION_JOB" schemaName="NOTARIST">
+            <column name="TENANT_ID"/>
+            <column name="PIPELINE_STATUS"/>
+        </createIndex>
+
+        <createIndex indexName="IDX_INGEST_JOB_CHECKSUM_TENANT"
+                     tableName="INGESTION_JOB" schemaName="NOTARIST">
+            <column name="CHECKSUM_SHA256"/>
+            <column name="TENANT_ID"/>
+        </createIndex>
+
+        <createIndex indexName="IDX_INGEST_JOB_RETRY"
+                     tableName="INGESTION_JOB" schemaName="NOTARIST">
+            <column name="PIPELINE_STATUS"/>
+            <column name="NEXT_RETRY_AT"/>
+        </createIndex>
+
+        <createIndex indexName="IDX_INGEST_JOB_DOCUMENT"
+                     tableName="INGESTION_JOB" schemaName="NOTARIST">
+            <column name="DOCUMENT_ID"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="V002-03" author="notarist-ingest">
+        <comment>Add check constraint for PIPELINE_STATUS allowed values</comment>
+        <sql>
+            ALTER TABLE NOTARIST.INGESTION_JOB ADD CONSTRAINT CHK_INGEST_JOB_STATUS
+            CHECK (PIPELINE_STATUS IN (
+                'UPLOADED', 'OCR_PENDING', 'OCR_COMPLETED',
+                'NER_PENDING', 'NER_COMPLETED',
+                'CHUNK_PENDING', 'CHUNK_COMPLETED',
+                'EMBED_PENDING', 'INDEX_PENDING',
+                'COMPLETED', 'FAILED', 'DLQ'
+            ))
+        </sql>
+        <rollback>
+            <sql>ALTER TABLE NOTARIST.INGESTION_JOB DROP CONSTRAINT CHK_INGEST_JOB_STATUS</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="V002-04" author="notarist-ingest">
+        <comment>Enable VPD policy on INGESTION_JOB for tenant isolation</comment>
+        <sql splitStatements="false">
+            BEGIN
+                DBMS_RLS.ADD_POLICY(
+                    object_schema   => 'NOTARIST',
+                    object_name     => 'INGESTION_JOB',
+                    policy_name     => 'INGEST_JOB_TENANT_POLICY',
+                    function_schema => 'NOTARIST',
+                    policy_function => 'TENANT_ISOLATION_POLICY',
+                    statement_types => 'SELECT,INSERT,UPDATE,DELETE',
+                    update_check    => TRUE,
+                    enable          => TRUE
+                );
+            END;
+        </sql>
+        <rollback>
+            <sql splitStatements="false">
+                BEGIN
+                    DBMS_RLS.DROP_POLICY(
+                        object_schema => 'NOTARIST',
+                        object_name   => 'INGESTION_JOB',
+                        policy_name   => 'INGEST_JOB_TENANT_POLICY'
+                    );
+                END;
+            </sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

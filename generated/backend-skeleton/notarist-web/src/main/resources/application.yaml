@@ -1,0 +1,122 @@
+spring:
+  application:
+    name: notarist-rag
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  jackson:
+    date-format: "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+    time-zone: UTC
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: ${PROMETHEUS_ENABLED:true}
+
+notarist:
+  security:
+    jwt:
+      issuer: ${JWT_ISSUER:notarist-rag}
+      access-token-ttl-minutes: ${JWT_ACCESS_TOKEN_TTL_MINUTES:15}
+      refresh-token-ttl-days: ${JWT_REFRESH_TOKEN_TTL_DAYS:7}
+      private-key-path: ${JWT_PRIVATE_KEY_PATH:file:./keys/notarist-private.pem}
+      public-key-path: ${JWT_PUBLIC_KEY_PATH:file:./keys/notarist-public.pem}
+    encryption:
+      key: ${APP_ENCRYPTION_KEY}
+      salt: ${APP_ENCRYPTION_SALT}
+
+  database:
+    oracle:
+      url: ${ORACLE_URL:jdbc:oracle:thin:@localhost:1521/NOTARISTDB}
+      username: ${ORACLE_USER:notarist_app}
+      password: ${ORACLE_PASSWORD}
+      pool-max: ${ORACLE_POOL_MAX:10}
+      pool-min: ${ORACLE_POOL_MIN:2}
+    postgres:
+      url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/notarist}
+      username: ${POSTGRES_USER:notarist_app}
+      password: ${POSTGRES_PASSWORD}
+      pool-max: ${POSTGRES_POOL_MAX:10}
+
+  storage:
+    qdrant:
+      url: ${QDRANT_URL:http://localhost:6333}
+      api-key: ${QDRANT_API_KEY:}
+      collection: ${QDRANT_COLLECTION:notarist_chunks}
+    minio:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      upload-url-ttl-minutes: ${MINIO_UPLOAD_URL_TTL_MINUTES:15}
+      buckets:
+        raw: ${MINIO_BUCKET_RAW:notarist-raw}
+        ocr: ${MINIO_BUCKET_OCR:notarist-ocr}
+        processed: ${MINIO_BUCKET_PROCESSED:notarist-processed}
+        chunk: ${MINIO_BUCKET_CHUNK:notarist-chunk}
+        export: ${MINIO_BUCKET_EXPORT:notarist-export}
+
+  ingestion:
+    queue:
+      poll-interval-ms: ${QUEUE_POLL_INTERVAL_MS:2000}
+      max-concurrent-workers: ${QUEUE_MAX_CONCURRENT_WORKERS:3}
+      lock-timeout-ms: ${QUEUE_LOCK_TIMEOUT_MS:300000}
+      max-retry-attempts: ${QUEUE_MAX_RETRY_ATTEMPTS:3}
+
+  search:
+    qdrant:
+      top-k-semantic: 20
+    bm25:
+      top-k-keyword: 20
+    rrf:
+      k: 60
+    reranker:
+      top-k-final: 5
+
+  ai:
+    ollama:
+      model: ${OLLAMA_MODEL:notarist-llm-7b}
+      stream: true
+      max-tokens: 2048
+    hallucination-guard:
+      enabled: true
+      min-citation-count: 1
+
+  sidecar:
+    ocr:
+      base-url: ${OCR_BASE_URL:http://localhost:8081}
+      timeout-ms: ${OCR_TIMEOUT_MS:120000}
+    ner:
+      base-url: ${NER_BASE_URL:http://localhost:8082}
+      timeout-ms: ${NER_TIMEOUT_MS:30000}
+    reranker:
+      base-url: ${RERANKER_BASE_URL:http://localhost:8083}
+      timeout-ms: ${RERANKER_TIMEOUT_MS:15000}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      timeout-ms: ${OLLAMA_TIMEOUT_MS:120000}
+
+  observability:
+    correlation-id-header: X-Correlation-ID
+    trace-id-header: X-Trace-ID
+    metrics:
+      enabled: true
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{correlationId}] - %msg%n"
+  level:
+    root: ${LOG_LEVEL:INFO}
+    com.notarist: INFO
+    org.springframework.security: WARN

@@ -3,7 +3,9 @@ package com.notarist.document.application.handler.query;
 import com.notarist.core.domain.exception.DocumentNotFoundException;
 import com.notarist.core.domain.exception.UnauthorizedAccessException;
 import com.notarist.core.domain.valueobject.ClassificationLevel;
+import com.notarist.core.domain.valueobject.DocumentId;
 import com.notarist.document.api.response.DocumentLegalResponse;
+import com.notarist.document.application.port.in.GetDocumentUseCase;
 import com.notarist.document.application.port.out.DocumentLegalRepository;
 import com.notarist.document.application.query.GetDocumentQuery;
 import com.notarist.document.domain.model.DocumentLegal;
@@ -12,7 +14,7 @@ import com.notarist.document.infrastructure.persistence.mapper.DocumentLegalMapp
 import org.springframework.stereotype.Service;
 
 @Service
-public class GetDocumentQueryHandler {
+public class GetDocumentQueryHandler implements GetDocumentUseCase {
 
     private final DocumentLegalRepository documentRepository;
     private final DocumentLegalMapper mapper;
@@ -25,6 +27,17 @@ public class GetDocumentQueryHandler {
         this.documentRepository = documentRepository;
         this.mapper = mapper;
         this.auditPublisher = auditPublisher;
+    }
+
+    @Override
+    public DocumentLegalResponse execute(DocumentId documentId, CallerContext caller) {
+        return handle(new GetDocumentQuery(
+                documentId,
+                caller.userId(),
+                caller.role(),
+                caller.tenantId(),
+                com.notarist.core.domain.valueobject.CorrelationId.generate()
+        ));
     }
 
     public DocumentLegalResponse handle(GetDocumentQuery query) {

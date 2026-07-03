@@ -152,7 +152,9 @@
                 <constraints nullable="false"/>
             </column>
             <column name="UPLOADED_BY" type="VARCHAR2(36)" remarks="FK to NOTARIST_USER">
-                <constraints nullable="false"/>
+                <constraints nullable="false"
+                             foreignKeyName="FK_DOKUMEN_UPLOADED_BY"
+                             references="NOTARIST.NOTARIST_USER(USER_ID)"/>
             </column>
             <column name="PAGE_COUNT" type="NUMBER(5)"/>
             <column name="VERSION_NUMBER" type="NUMBER(3)" defaultValueNumeric="1">
@@ -178,6 +180,10 @@
         <createIndex indexName="IDX_DOKUMEN_LEGAL_TYPE" tableName="DOKUMEN_LEGAL" schemaName="NOTARIST">
             <column name="DOCUMENT_TYPE"/>
             <column name="TENANT_ID"/>
+        </createIndex>
+        <!-- Oracle does not auto-index FK columns; explicit index prevents full-table locks on parent delete -->
+        <createIndex indexName="IDX_DOKUMEN_LEGAL_UPLOADED_BY" tableName="DOKUMEN_LEGAL" schemaName="NOTARIST">
+            <column name="UPLOADED_BY"/>
         </createIndex>
     </changeSet>
 

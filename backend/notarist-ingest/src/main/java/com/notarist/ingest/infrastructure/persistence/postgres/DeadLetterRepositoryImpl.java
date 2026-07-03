@@ -50,7 +50,7 @@ public class DeadLetterRepositoryImpl implements DeadLetterRepository {
     private final JdbcTemplate postgresJdbcTemplate;
 
     public DeadLetterRepositoryImpl(
-            @Qualifier("postgresJdbcTemplate") JdbcTemplate postgresJdbcTemplate) {
+            @Qualifier("ingestJdbcTemplate") JdbcTemplate postgresJdbcTemplate) {
         this.postgresJdbcTemplate = postgresJdbcTemplate;
     }
 

@@ -48,8 +48,8 @@ public class IngestModuleConfig {
         return new HikariDataSource(config);
     }
 
-    @Bean("postgresJdbcTemplate")
-    public JdbcTemplate postgresJdbcTemplate(
+    @Bean("ingestJdbcTemplate")
+    public JdbcTemplate ingestJdbcTemplate(
             @Qualifier("ingestPostgresDataSource") DataSource dataSource) {
         return new JdbcTemplate(dataSource);
     }

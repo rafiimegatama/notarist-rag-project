@@ -88,7 +88,7 @@ public class IngestionQueueRepositoryImpl implements IngestQueueRepository {
     private final JdbcTemplate postgresJdbcTemplate;
 
     public IngestionQueueRepositoryImpl(
-            @Qualifier("postgresJdbcTemplate") JdbcTemplate postgresJdbcTemplate) {
+            @Qualifier("ingestJdbcTemplate") JdbcTemplate postgresJdbcTemplate) {
         this.postgresJdbcTemplate = postgresJdbcTemplate;
     }
 

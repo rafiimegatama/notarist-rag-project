@@ -112,6 +112,11 @@
                      tableName="INGESTION_JOB" schemaName="NOTARIST">
             <column name="DOCUMENT_ID"/>
         </createIndex>
+        <!-- Oracle does not auto-index FK columns; prevents full-table scan on UPLOADED_BY lookups -->
+        <createIndex indexName="IDX_INGEST_JOB_UPLOADED_BY"
+                     tableName="INGESTION_JOB" schemaName="NOTARIST">
+            <column name="UPLOADED_BY"/>
+        </createIndex>
     </changeSet>
 
     <changeSet id="V002-03" author="notarist-ingest">

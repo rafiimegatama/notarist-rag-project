@@ -3,10 +3,11 @@ package com.notarist.infra.postgres;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * PostgreSQL connection properties for the search module.
- * Bound from spring.datasource.postgres.* in application.yml.
+ * PostgreSQL connection properties.
+ * Bound from notarist.database.postgres.* in application.yaml.
+ * Fields with no yaml entry use compact-constructor defaults (url and username are required).
  */
-@ConfigurationProperties(prefix = "spring.datasource.postgres")
+@ConfigurationProperties(prefix = "notarist.database.postgres")
 public record PostgresProperties(
         String url,
         String username,
@@ -22,8 +23,8 @@ public record PostgresProperties(
         String schema
 ) {
     public PostgresProperties {
-        if (url == null || url.isBlank())           throw new IllegalStateException("spring.datasource.postgres.url required");
-        if (username == null || username.isBlank()) throw new IllegalStateException("spring.datasource.postgres.username required");
+        if (url == null || url.isBlank())           throw new IllegalStateException("notarist.database.postgres.url required");
+        if (username == null || username.isBlank()) throw new IllegalStateException("notarist.database.postgres.username required");
         if (driverClassName == null || driverClassName.isBlank()) driverClassName = "org.postgresql.Driver";
         if (minimumIdle <= 0)          minimumIdle        = 2;
         if (maximumPoolSize <= 0)      maximumPoolSize     = 10;

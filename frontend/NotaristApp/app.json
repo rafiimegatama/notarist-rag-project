@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Notarist RAG",
+    "slug": "notarist-rag",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.notarist.ragapp"
+    },
+    "android": {
+      "package": "com.notarist.ragapp",
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A",
+        "foregroundImage": "./assets/icon.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "apiUrl": "http://localhost:8080/api/v1"
+    }
+  }
+}

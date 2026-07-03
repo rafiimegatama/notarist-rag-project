@@ -1,0 +1,233 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+} from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import { listDocuments, initiateUpload } from '../api/documents';
+
+const DOC_TYPE_LABELS = {
+  AKTA: 'Akta',
+  SERTIFIKAT: 'Sertifikat',
+  SOP: 'SOP',
+  REGULASI: 'Regulasi',
+  FIDUSIA: 'Fidusia',
+};
+
+const STATUS_COLORS = {
+  INDEXED: '#10B981',
+  PROCESSING: '#F59E0B',
+  UPLOADED: '#3B82F6',
+  FAILED: '#EF4444',
+};
+
+function DocumentCard({ doc, onPress }) {
+  const statusColor = STATUS_COLORS[doc.status] || '#64748B';
+  return (
+    <TouchableOpacity style={styles.card} onPress={() => onPress(doc)}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle} numberOfLines={1}>{doc.originalFilename}</Text>
+        <View style={[styles.badge, { backgroundColor: statusColor + '22', borderColor: statusColor }]}>
+          <Text style={[styles.badgeText, { color: statusColor }]}>{doc.status}</Text>
+        </View>
+      </View>
+      <View style={styles.cardMeta}>
+        <Text style={styles.metaText}>{DOC_TYPE_LABELS[doc.documentType] || doc.documentType}</Text>
+        <Text style={styles.metaDot}>·</Text>
+        <Text style={styles.metaText}>{doc.classificationLevel}</Text>
+        {doc.createdAt && (
+          <>
+            <Text style={styles.metaDot}>·</Text>
+            <Text style={styles.metaText}>{new Date(doc.createdAt).toLocaleDateString('id-ID')}</Text>
+          </>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+export default function DocumentsScreen({ navigation }) {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+
+  const loadDocuments = useCallback(async (reset = false) => {
+    const currentPage = reset ? 0 : page;
+    try {
+      const data = await listDocuments(currentPage, 20);
+      const items = data.data?.content ?? [];
+      if (reset) {
+        setDocuments(items);
+        setPage(0);
+      } else {
+        setDocuments(prev => [...prev, ...items]);
+      }
+      const totalPages = data.data?.totalPages ?? 1;
+      setHasMore(currentPage < totalPages - 1);
+      if (!reset) setPage(p => p + 1);
+    } catch (err) {
+      if (err.response?.status !== 404) {
+        Alert.alert('Error', 'Gagal memuat dokumen');
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [page]);
+
+  useEffect(() => { loadDocuments(true); }, []);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadDocuments(true);
+  };
+
+  const handleUpload = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) return;
+
+      const file = result.assets[0];
+      setUploading(true);
+
+      // For now, initiate with a placeholder checksum
+      // In production, compute SHA-256 of the file before uploading
+      await initiateUpload({
+        originalFilename: file.name,
+        checksumSha256: '0'.repeat(64), // placeholder — real app computes SHA-256
+        documentType: 'AKTA',
+        classificationLevel: 'INTERNAL',
+      });
+
+      Alert.alert('Berhasil', 'Dokumen berhasil diunggah dan sedang diproses');
+      loadDocuments(true);
+    } catch (err) {
+      const msg = err.response?.data?.errorMessage || 'Upload gagal';
+      Alert.alert('Upload Gagal', msg);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const renderEmpty = () => (
+    <View style={styles.empty}>
+      <Text style={styles.emptyIcon}>📂</Text>
+      <Text style={styles.emptyTitle}>Belum ada dokumen</Text>
+      <Text style={styles.emptyDesc}>Unggah dokumen pertama Anda</Text>
+    </View>
+  );
+
+  const renderFooter = () => {
+    if (!hasMore) return null;
+    return <ActivityIndicator color="#3B82F6" style={{ marginVertical: 16 }} />;
+  };
+
+  return (
+    <View style={styles.container}>
+      <FlatList
+        data={documents}
+        keyExtractor={(item) => item.documentId || item.id || String(Math.random())}
+        renderItem={({ item }) => (
+          <DocumentCard doc={item} onPress={(doc) => {
+            Alert.alert(doc.originalFilename, `ID: ${doc.documentId}\nStatus: ${doc.status}`);
+          }} />
+        )}
+        contentContainerStyle={documents.length === 0 ? styles.emptyContainer : styles.listContent}
+        ListEmptyComponent={!loading ? renderEmpty : null}
+        ListFooterComponent={renderFooter}
+        onEndReached={() => hasMore && loadDocuments()}
+        onEndReachedThreshold={0.3}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#3B82F6" />}
+      />
+
+      {loading && documents.length === 0 && (
+        <ActivityIndicator style={styles.loadingCenter} color="#3B82F6" size="large" />
+      )}
+
+      <TouchableOpacity
+        style={[styles.fab, uploading && styles.fabDisabled]}
+        onPress={handleUpload}
+        disabled={uploading}
+      >
+        {uploading ? (
+          <ActivityIndicator color="#fff" size="small" />
+        ) : (
+          <Text style={styles.fabIcon}>+</Text>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0F172A' },
+  listContent: { padding: 16, paddingBottom: 80 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  card: {
+    backgroundColor: '#1E293B',
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  cardTitle: {
+    color: '#F1F5F9',
+    fontSize: 15,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 8,
+  },
+  badge: {
+    borderRadius: 4,
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  badgeText: { fontSize: 10, fontWeight: '600' },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  metaText: { color: '#64748B', fontSize: 12 },
+  metaDot: { color: '#475569', fontSize: 12 },
+  empty: { alignItems: 'center' },
+  emptyIcon: { fontSize: 48, marginBottom: 12 },
+  emptyTitle: { color: '#94A3B8', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  emptyDesc: { color: '#475569', fontSize: 13 },
+  loadingCenter: { position: 'absolute', alignSelf: 'center', top: '45%' },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 6,
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+  },
+  fabDisabled: { opacity: 0.6 },
+  fabIcon: { color: '#fff', fontSize: 28, lineHeight: 32 },
+});

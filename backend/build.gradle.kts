@@ -19,16 +19,18 @@ subprojects {
     }
 
     repositories {
-        maven {
-            name = "NotaristNexus"
-            url = uri(System.getenv("NEXUS_URL") ?: "https://nexus.notarist.internal/repository/maven-public/")
-            credentials {
-                username = System.getenv("NEXUS_USER")
-                password = System.getenv("NEXUS_PASSWORD")
-            }
-            isAllowInsecureProtocol = false
-        }
         mavenCentral()
+        if (System.getenv("NEXUS_URL") != null) {
+            maven {
+                name = "NotaristNexus"
+                url = uri(System.getenv("NEXUS_URL")!!)
+                credentials {
+                    username = System.getenv("NEXUS_USER")
+                    password = System.getenv("NEXUS_PASSWORD")
+                }
+                isAllowInsecureProtocol = false
+            }
+        }
     }
 
     dependencyManagement {

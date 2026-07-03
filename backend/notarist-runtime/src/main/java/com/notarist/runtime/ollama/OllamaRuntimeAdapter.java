@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Qualifier;
 import com.notarist.assistant.application.port.out.LlmPort;
+import com.notarist.assistant.domain.model.LlmRequest;
+import com.notarist.assistant.domain.model.LlmResponse;
+import com.notarist.assistant.domain.model.LlmStreamChunk;
 import com.notarist.runtime.degradation.RuntimeDegradationManager;
 import com.notarist.runtime.guard.ContextOverflowGuard;
 import com.notarist.runtime.metrics.RuntimeMetricsRegistry;
@@ -76,6 +79,25 @@ public class OllamaRuntimeAdapter implements LlmPort {
     }
 
     @Override
+    public LlmResponse invoke(LlmRequest request) {
+        long startMs = System.currentTimeMillis();
+        String content = generate(request.systemPrompt(), request.userPrompt(), request.traceId());
+        long durationMs = System.currentTimeMillis() - startMs;
+        return new LlmResponse(content, modelRegistry.getLlm().modelName(), 0, 0, durationMs, false, false);
+    }
+
+    @Override
+    public void stream(LlmRequest request, Consumer<LlmStreamChunk> chunkConsumer) {
+        final int[] idx = {0};
+        generateStreaming(request.systemPrompt(), request.userPrompt(), request.traceId(),
+                token -> {
+                    int i = idx[0]++;
+                    chunkConsumer.accept(new LlmStreamChunk(request.traceId() + "-" + i, token, false, i));
+                });
+        chunkConsumer.accept(new LlmStreamChunk(request.traceId() + "-done", "", true, idx[0]));
+    }
+
+    @Override
     public boolean isAvailable() {
         if (degradation.isDegraded(RuntimeDegradationManager.AiRuntime.OLLAMA)) return false;
         try {
@@ -90,8 +112,7 @@ public class OllamaRuntimeAdapter implements LlmPort {
         }
     }
 
-    @Override
-    public String generate(String systemPrompt, String userMessage, String traceId) {
+    private String generate(String systemPrompt, String userMessage, String traceId) {
         if (degradation.isDegraded(RuntimeDegradationManager.AiRuntime.OLLAMA)) {
             log.warn("OllamaRuntimeAdapter: OLLAMA degraded — returning fallback for traceId={}", traceId);
             return fallbackResponse();
@@ -115,9 +136,8 @@ public class OllamaRuntimeAdapter implements LlmPort {
         }
     }
 
-    @Override
-    public void generateStreaming(String systemPrompt, String userMessage, String traceId,
-                                  Consumer<String> tokenConsumer) {
+    private void generateStreaming(String systemPrompt, String userMessage, String traceId,
+                                   Consumer<String> tokenConsumer) {
         if (degradation.isDegraded(RuntimeDegradationManager.AiRuntime.OLLAMA)) {
             log.warn("OllamaRuntimeAdapter: OLLAMA degraded — streaming fallback traceId={}", traceId);
             tokenConsumer.accept(fallbackResponse());

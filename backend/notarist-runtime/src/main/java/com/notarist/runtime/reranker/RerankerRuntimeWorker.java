@@ -36,6 +36,9 @@ public class RerankerRuntimeWorker implements RerankerPort {
     private static final Logger log = LoggerFactory.getLogger(RerankerRuntimeWorker.class);
     private static final long   RERANK_TIMEOUT_MS   = 15_000L;
     private static final float  DEGRADED_SCORE      = 0.5f;
+    private static final int    DEFAULT_TOP_K       = 5;
+
+    private record RankedCandidate(String chunkId, String text, float score) {}
 
     private final RestTemplate                    restTemplate;
     private final ModelRegistry                   modelRegistry;
@@ -60,12 +63,12 @@ public class RerankerRuntimeWorker implements RerankerPort {
     }
 
     @Override
-    public List<RankedCandidate> rerank(String query, List<RerankCandidate> candidates, int topK) {
+    public List<RerankerPort.RerankResult> rerank(String query, List<RerankerPort.RerankCandidate> candidates) {
         if (candidates == null || candidates.isEmpty()) return List.of();
 
         if (degradation.isDegraded(RuntimeDegradationManager.AiRuntime.RERANKER)) {
             log.warn("RerankerRuntimeWorker: RERANKER degraded — returning passthrough scores");
-            return passthroughRank(candidates, topK);
+            return passthroughRank(candidates);
         }
 
         String rerankId = "rerank-" + System.currentTimeMillis();
@@ -73,7 +76,7 @@ public class RerankerRuntimeWorker implements RerankerPort {
 
         try {
             List<RankedCandidate> result = queue.submit(() ->
-                    timeout.submitWithTimeout(rerankId, () -> callReranker(query, candidates, topK), RERANK_TIMEOUT_MS)
+                    timeout.submitWithTimeout(rerankId, () -> callReranker(query, candidates, DEFAULT_TOP_K), RERANK_TIMEOUT_MS)
             ).get();
 
             long durationMs = System.currentTimeMillis() - startMs;
@@ -81,27 +84,29 @@ public class RerankerRuntimeWorker implements RerankerPort {
             degradation.markRuntime(RuntimeDegradationManager.AiRuntime.RERANKER, false, null);
 
             log.debug("RerankerRuntimeWorker: reranked {} → {} topK={} durationMs={}",
-                    candidates.size(), result.size(), topK, durationMs);
-            return result;
+                    candidates.size(), result.size(), DEFAULT_TOP_K, durationMs);
+            return result.stream()
+                    .map(r -> new RerankerPort.RerankResult(r.chunkId(), r.score()))
+                    .toList();
 
         } catch (TimeoutCancellationOrchestrator.TimeoutException e) {
             metrics.recordTimeout(ModelProvider.CROSS_ENCODER);
             degradation.markRuntime(RuntimeDegradationManager.AiRuntime.RERANKER, true, "timeout");
             log.error("RerankerRuntimeWorker: timeout rerankId={}", rerankId);
-            return passthroughRank(candidates, topK);
+            return passthroughRank(candidates);
 
         } catch (Exception e) {
             degradation.markRuntime(RuntimeDegradationManager.AiRuntime.RERANKER, true, e.getMessage());
             log.error("RerankerRuntimeWorker: failed rerankId={}: {}", rerankId, e.getMessage(), e);
-            return passthroughRank(candidates, topK);
+            return passthroughRank(candidates);
         }
     }
 
     @SuppressWarnings("unchecked")
-    private List<RankedCandidate> callReranker(String query, List<RerankCandidate> candidates, int topK) throws Exception {
+    private List<RankedCandidate> callReranker(String query, List<RerankerPort.RerankCandidate> candidates, int topK) throws Exception {
         String endpoint = modelRegistry.getReranker().endpointUrl() + "/rerank";
 
-        List<String> passages = candidates.stream().map(RerankCandidate::text).toList();
+        List<String> passages = candidates.stream().map(RerankerPort.RerankCandidate::text).toList();
         Map<String, Object> body = Map.of("query", query, "passages", passages, "top_k", topK);
 
         HttpHeaders headers = new HttpHeaders();
@@ -122,17 +127,17 @@ public class RerankerRuntimeWorker implements RerankerPort {
             int   idx   = ((Number) item.get("index")).intValue();
             float score = ((Number) item.get("score")).floatValue();
             if (idx >= 0 && idx < candidates.size()) {
-                RerankCandidate candidate = candidates.get(idx);
+                RerankerPort.RerankCandidate candidate = candidates.get(idx);
                 ranked.add(new RankedCandidate(candidate.chunkId(), candidate.text(), score));
             }
         }
         return ranked;
     }
 
-    private List<RankedCandidate> passthroughRank(List<RerankCandidate> candidates, int topK) {
-        int limit = Math.min(topK, candidates.size());
+    private List<RerankerPort.RerankResult> passthroughRank(List<RerankerPort.RerankCandidate> candidates) {
+        int limit = Math.min(DEFAULT_TOP_K, candidates.size());
         return candidates.subList(0, limit).stream()
-                .map(c -> new RankedCandidate(c.chunkId(), c.text(), DEGRADED_SCORE))
+                .map(c -> new RerankerPort.RerankResult(c.chunkId(), DEGRADED_SCORE))
                 .toList();
     }
 }

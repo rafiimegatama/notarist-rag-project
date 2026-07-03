@@ -5,7 +5,6 @@ import com.notarist.ingest.application.port.out.VectorIndexPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 
@@ -13,7 +12,7 @@ import java.util.List;
  * Stub adapter for Qdrant on configured URL.
  * No-ops all operations. Replace with real Qdrant client calls in Phase 2C.
  */
-@Component
+// @Component deactivated: superseded by QdrantIndexAdapter in notarist-infra (Phase 5)
 public class VectorIndexAdapter implements VectorIndexPort {
 
     private static final Logger log = LoggerFactory.getLogger(VectorIndexAdapter.class);

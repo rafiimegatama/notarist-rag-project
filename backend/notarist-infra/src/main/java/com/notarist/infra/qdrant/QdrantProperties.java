@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Qdrant connection properties.
  * Bound from spring.qdrant.* in application.yml.
  */
-@ConfigurationProperties(prefix = "spring.qdrant")
+@ConfigurationProperties(prefix = "notarist.storage.qdrant")
 public record QdrantProperties(
         String host,
         int port,

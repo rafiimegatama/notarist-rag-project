@@ -6,7 +6,6 @@ import com.notarist.assistant.domain.model.LlmResponse;
 import com.notarist.assistant.domain.model.LlmStreamChunk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -20,7 +19,7 @@ import java.util.function.Consumer;
  *
  * isAvailable() returns false — callers must handle LLM-unavailable paths gracefully.
  */
-@Component
+// @Component deactivated: superseded by OllamaRuntimeAdapter in notarist-runtime (Phase 5)
 public class OllamaAdapter implements LlmPort {
 
     private static final Logger log = LoggerFactory.getLogger(OllamaAdapter.class);

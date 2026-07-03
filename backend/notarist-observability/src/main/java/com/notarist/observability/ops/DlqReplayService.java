@@ -2,6 +2,7 @@ package com.notarist.observability.ops;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -54,7 +55,7 @@ public class DlqReplayService {
 
     private final JdbcTemplate postgresJdbcTemplate;
 
-    public DlqReplayService(JdbcTemplate postgresJdbcTemplate) {
+    public DlqReplayService(@Qualifier("postgresJdbcTemplate") JdbcTemplate postgresJdbcTemplate) {
         this.postgresJdbcTemplate = postgresJdbcTemplate;
     }
 

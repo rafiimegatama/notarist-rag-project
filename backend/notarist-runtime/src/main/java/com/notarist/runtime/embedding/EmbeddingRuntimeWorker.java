@@ -10,6 +10,7 @@ import com.notarist.runtime.timeout.TimeoutCancellationOrchestrator;
 import com.notarist.infra.qdrant.QdrantVectorPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -45,13 +46,13 @@ public class EmbeddingRuntimeWorker {
     private final ObjectMapper                    objectMapper;
 
     public EmbeddingRuntimeWorker(
-            RestTemplate restTemplate,
+            @Qualifier("aiRuntimeRestTemplate") RestTemplate restTemplate,
             ModelRegistry modelRegistry,
             RuntimeMetricsRegistry metrics,
             RuntimeDegradationManager degradation,
             TimeoutCancellationOrchestrator timeout,
             EmbeddingQueueIsolation queue,
-            ObjectMapper objectMapper) {
+            @Qualifier("aiRuntimeObjectMapper") ObjectMapper objectMapper) {
         this.restTemplate  = restTemplate;
         this.modelRegistry = modelRegistry;
         this.metrics       = metrics;

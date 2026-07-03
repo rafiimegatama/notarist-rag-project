@@ -2,6 +2,7 @@ package com.notarist.observability.consistency;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -47,7 +48,7 @@ public class SnapshotReadinessChecker {
 
     private final JdbcTemplate postgresJdbcTemplate;
 
-    public SnapshotReadinessChecker(JdbcTemplate postgresJdbcTemplate) {
+    public SnapshotReadinessChecker(@Qualifier("postgresJdbcTemplate") JdbcTemplate postgresJdbcTemplate) {
         this.postgresJdbcTemplate = postgresJdbcTemplate;
     }
 

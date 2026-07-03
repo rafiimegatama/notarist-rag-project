@@ -45,7 +45,7 @@ notarist:
       pool-max: ${ORACLE_POOL_MAX:10}
       pool-min: ${ORACLE_POOL_MIN:2}
     postgres:
-      url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/notarist}
+      url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/notarist_search}
       username: ${POSTGRES_USER:notarist_app}
       password: ${POSTGRES_PASSWORD}
       pool-max: ${POSTGRES_POOL_MAX:10}

@@ -2,6 +2,7 @@ package com.notarist.observability.ops;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -52,7 +53,7 @@ public class ReindexTriggerService {
 
     private final JdbcTemplate postgresJdbcTemplate;
 
-    public ReindexTriggerService(JdbcTemplate postgresJdbcTemplate) {
+    public ReindexTriggerService(@Qualifier("postgresJdbcTemplate") JdbcTemplate postgresJdbcTemplate) {
         this.postgresJdbcTemplate = postgresJdbcTemplate;
     }
 

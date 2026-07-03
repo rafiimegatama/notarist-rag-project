@@ -4,6 +4,7 @@ import com.notarist.runtime.degradation.RuntimeDegradationManager;
 import com.notarist.runtime.metrics.RuntimeMetricsRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -38,7 +39,7 @@ public class ModelLoadLifecycle {
             ModelRegistry modelRegistry,
             RuntimeDegradationManager degradationManager,
             RuntimeMetricsRegistry metricsRegistry,
-            RestTemplate restTemplate) {
+            @Qualifier("aiRuntimeRestTemplate") RestTemplate restTemplate) {
         this.modelRegistry      = modelRegistry;
         this.degradationManager = degradationManager;
         this.metricsRegistry    = metricsRegistry;

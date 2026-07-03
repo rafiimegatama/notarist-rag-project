@@ -2,6 +2,7 @@ package com.notarist.runtime.ollama;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Qualifier;
 import com.notarist.assistant.application.port.out.LlmPort;
 import com.notarist.runtime.degradation.RuntimeDegradationManager;
 import com.notarist.runtime.guard.ContextOverflowGuard;
@@ -58,7 +59,7 @@ public class OllamaRuntimeAdapter implements LlmPort {
             StreamingCancellationManager cancellationManager,
             InferenceQueueIsolation inferenceQueue,
             ContextOverflowGuard overflowGuard,
-            ObjectMapper objectMapper) {
+            @Qualifier("aiRuntimeObjectMapper") ObjectMapper objectMapper) {
         this.modelRegistry       = modelRegistry;
         this.metrics             = metrics;
         this.degradation         = degradation;

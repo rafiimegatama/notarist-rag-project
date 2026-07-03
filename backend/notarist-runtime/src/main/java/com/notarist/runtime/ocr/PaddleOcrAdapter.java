@@ -11,6 +11,7 @@ import com.notarist.runtime.timeout.TimeoutCancellationOrchestrator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -49,7 +50,7 @@ public class PaddleOcrAdapter implements OcrServicePort {
     private final TimeoutCancellationOrchestrator timeout;
 
     public PaddleOcrAdapter(
-            RestTemplate restTemplate,
+            @Qualifier("aiRuntimeRestTemplate") RestTemplate restTemplate,
             ModelRegistry modelRegistry,
             RuntimeMetricsRegistry metrics,
             RuntimeDegradationManager degradation,

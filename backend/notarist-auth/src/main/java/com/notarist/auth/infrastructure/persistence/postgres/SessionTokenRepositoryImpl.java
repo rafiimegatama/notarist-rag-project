@@ -4,6 +4,7 @@ import com.notarist.auth.application.port.out.SessionTokenRepository;
 import com.notarist.auth.domain.model.Session;
 import com.notarist.core.domain.valueobject.PersonId;
 import com.notarist.core.domain.valueobject.SessionId;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -20,7 +21,7 @@ public class SessionTokenRepositoryImpl implements SessionTokenRepository {
 
     private final JdbcTemplate postgresJdbcTemplate;
 
-    public SessionTokenRepositoryImpl(JdbcTemplate postgresJdbcTemplate) {
+    public SessionTokenRepositoryImpl(@Qualifier("postgresJdbcTemplate") JdbcTemplate postgresJdbcTemplate) {
         this.postgresJdbcTemplate = postgresJdbcTemplate;
     }
 

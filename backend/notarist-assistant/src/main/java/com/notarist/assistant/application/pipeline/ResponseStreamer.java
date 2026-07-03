@@ -2,6 +2,7 @@ package com.notarist.assistant.application.pipeline;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.notarist.assistant.api.response.AssistantResponse;
+import org.springframework.beans.factory.annotation.Qualifier;
 import com.notarist.assistant.api.response.CitationDto;
 import com.notarist.assistant.api.response.SseEvent;
 import org.slf4j.Logger;
@@ -36,7 +37,7 @@ public class ResponseStreamer {
 
     private final ObjectMapper objectMapper;
 
-    public ResponseStreamer(ObjectMapper objectMapper) {
+    public ResponseStreamer(@Qualifier("objectMapper") ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 

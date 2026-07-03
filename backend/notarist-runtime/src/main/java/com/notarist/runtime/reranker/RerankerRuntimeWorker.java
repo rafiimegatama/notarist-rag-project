@@ -8,6 +8,7 @@ import com.notarist.runtime.timeout.TimeoutCancellationOrchestrator;
 import com.notarist.search.application.port.out.RerankerPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -44,7 +45,7 @@ public class RerankerRuntimeWorker implements RerankerPort {
     private final RerankerQueueIsolation          queue;
 
     public RerankerRuntimeWorker(
-            RestTemplate restTemplate,
+            @Qualifier("aiRuntimeRestTemplate") RestTemplate restTemplate,
             ModelRegistry modelRegistry,
             RuntimeMetricsRegistry metrics,
             RuntimeDegradationManager degradation,

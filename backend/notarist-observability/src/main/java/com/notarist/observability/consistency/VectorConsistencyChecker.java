@@ -2,6 +2,7 @@ package com.notarist.observability.consistency;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -55,8 +56,8 @@ public class VectorConsistencyChecker {
     private final RestTemplate restTemplate;
     private final String       qdrantBaseUrl;
 
-    public VectorConsistencyChecker(JdbcTemplate postgresJdbcTemplate,
-                                     RestTemplate restTemplate) {
+    public VectorConsistencyChecker(@Qualifier("postgresJdbcTemplate") JdbcTemplate postgresJdbcTemplate,
+                                     @Qualifier("observabilityRestTemplate") RestTemplate restTemplate) {
         this.postgresJdbcTemplate = postgresJdbcTemplate;
         this.restTemplate         = restTemplate;
         this.qdrantBaseUrl        = "http://localhost:6333";

@@ -10,6 +10,8 @@ dependencies {
     implementation(libs.spring.boot.starter.actuator)
     implementation(libs.micrometer.prometheus)
     implementation(libs.reactor.core)
+    implementation(libs.okhttp)
+    implementation(libs.jackson.databind)
 
     testImplementation(libs.spring.boot.starter.test)
 }

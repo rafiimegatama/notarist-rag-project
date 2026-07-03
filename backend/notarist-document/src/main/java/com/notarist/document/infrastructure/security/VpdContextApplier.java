@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
  * Applies Oracle VPD context for the current user principal before each Oracle query.
  * Document module's own instance — module isolation prevents importing from notarist-auth.
  */
-@Component
+@Component("documentVpdContextApplier")
 public class VpdContextApplier {
 
     private static final String SET_CTX_SQL =

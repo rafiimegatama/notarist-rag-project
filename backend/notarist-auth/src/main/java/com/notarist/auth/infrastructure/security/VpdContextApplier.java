@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
  * Applies Oracle VPD context for the current user principal before each Oracle query.
  * Uses Hibernate's Session.doWork to execute DBMS_SESSION.SET_CONTEXT over the raw JDBC connection.
  */
-@Component
+@Component("authVpdContextApplier")
 public class VpdContextApplier {
 
     private static final String SET_CTX_SQL =

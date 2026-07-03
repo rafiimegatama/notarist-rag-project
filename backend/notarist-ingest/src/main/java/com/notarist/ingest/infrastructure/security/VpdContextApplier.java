@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import java.sql.CallableStatement;
 
 /** Ingest module VPD applier — local copy to enforce module isolation (no auth/document import). */
-@Component
+@Component("ingestVpdContextApplier")
 public class VpdContextApplier {
 
     private static final Logger log = LoggerFactory.getLogger(VpdContextApplier.class);

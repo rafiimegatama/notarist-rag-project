@@ -48,7 +48,7 @@ public class SessionTokenRepositoryImpl implements SessionTokenRepository {
     @Override
     public Optional<Session> findByRefreshTokenHash(String refreshTokenHash) {
         var results = postgresJdbcTemplate.query(
-                "SELECT * FROM session_token WHERE refresh_token_hash = ? AND invalidated = false",
+                "SELECT session_id, user_id, tenant_id, refresh_token_hash, created_at, expires_at, invalidated FROM session_token WHERE refresh_token_hash = ? AND invalidated = false",
                 SESSION_ROW_MAPPER,
                 refreshTokenHash
         );
@@ -58,7 +58,7 @@ public class SessionTokenRepositoryImpl implements SessionTokenRepository {
     @Override
     public Optional<Session> findById(SessionId sessionId) {
         var results = postgresJdbcTemplate.query(
-                "SELECT * FROM session_token WHERE session_id = ?",
+                "SELECT session_id, user_id, tenant_id, refresh_token_hash, created_at, expires_at, invalidated FROM session_token WHERE session_id = ?",
                 SESSION_ROW_MAPPER,
                 sessionId.value()
         );

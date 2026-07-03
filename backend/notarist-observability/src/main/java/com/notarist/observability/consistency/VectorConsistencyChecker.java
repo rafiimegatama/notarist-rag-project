@@ -125,7 +125,7 @@ public class VectorConsistencyChecker {
                 FROM chunk_index
                 WHERE tenant_id = ?::uuid
                 ORDER BY created_at DESC
-                FETCH FIRST ? ROWS ONLY
+                LIMIT ?
                 """;
         return postgresJdbcTemplate.queryForList(sql, String.class, tenantId, limit);
     }

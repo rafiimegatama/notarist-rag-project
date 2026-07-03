@@ -1,6 +1,9 @@
 dependencies {
     implementation(project(":notarist-core"))
     implementation(project(":notarist-ingest"))
+    implementation(project(":notarist-search"))
+    implementation(project(":notarist-assistant"))
+    implementation(project(":notarist-infra"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.webflux)

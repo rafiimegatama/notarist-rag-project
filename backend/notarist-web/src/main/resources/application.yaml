@@ -8,6 +8,16 @@ spring:
     time-zone: UTC
     serialization:
       write-dates-as-timestamps: false
+  flyway:
+    enabled: false
+  liquibase:
+    enabled: ${LIQUIBASE_ENABLED:false}
+    change-log: classpath:/db/oracle/changelog/db.changelog-master.yaml
+  jpa:
+    hibernate:
+      ddl-auto: none
+    database-platform: org.hibernate.dialect.OracleDialect
+    open-in-view: false
 
 server:
   port: ${SERVER_PORT:8080}

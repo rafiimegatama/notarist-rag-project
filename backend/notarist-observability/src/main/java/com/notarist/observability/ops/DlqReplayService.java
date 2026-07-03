@@ -61,22 +61,22 @@ public class DlqReplayService {
 
     public List<DlqItem> listPending(String tenantId, int limit) {
         String sql = """
-                SELECT dlq_item_id::text, document_id::text, tenant_id::text,
-                       failure_stage, retry_count, failure_reason
+                SELECT dlq_id::text, document_id::text, tenant_id::text,
+                       failure_stage, retry_count, dead_letter_reason
                 FROM dead_letter_queue
                 WHERE resolved_at IS NULL
                   AND (? IS NULL OR tenant_id = ?::uuid)
                 ORDER BY created_at ASC
-                FETCH FIRST ? ROWS ONLY
+                LIMIT ?
                 """;
         return postgresJdbcTemplate.query(sql,
                 (rs, i) -> new DlqItem(
-                        rs.getString("dlq_item_id"),
+                        rs.getString("dlq_id"),
                         rs.getString("document_id"),
                         rs.getString("tenant_id"),
                         rs.getString("failure_stage"),
                         rs.getInt("retry_count"),
-                        rs.getString("failure_reason")
+                        rs.getString("dead_letter_reason")
                 ),
                 tenantId, tenantId, limit);
     }
@@ -106,7 +106,7 @@ public class DlqReplayService {
         try {
             List<String> ids = postgresJdbcTemplate.queryForList(
                     """
-                    SELECT dlq_item_id::text FROM dead_letter_queue
+                    SELECT dlq_id::text FROM dead_letter_queue
                     WHERE failure_stage = ? AND resolved_at IS NULL
                       AND (? IS NULL OR tenant_id = ?::uuid)
                     """, String.class, failureStage, tenantId, tenantId);
@@ -129,7 +129,7 @@ public class DlqReplayService {
 
     private DlqReplayResult forceRetry(String dlqItemId, String operatorId, String traceId) {
         String getSql = """
-                SELECT document_id::text FROM dead_letter_queue WHERE dlq_item_id = ?::uuid
+                SELECT document_id::text FROM dead_letter_queue WHERE dlq_id = ?::uuid
                 """;
         Map<String, Object> row = postgresJdbcTemplate.queryForMap(getSql, dlqItemId);
         String documentId = (String) row.get("document_id");
@@ -137,7 +137,7 @@ public class DlqReplayService {
         postgresJdbcTemplate.update("""
                 UPDATE dead_letter_queue
                 SET resolved_at = NOW(), resolved_by = ?, resolve_trace_id = ?, resolve_reason = 'FORCE_RETRY'
-                WHERE dlq_item_id = ?::uuid
+                WHERE dlq_id = ?::uuid
                 """, operatorId, traceId, dlqItemId);
 
         postgresJdbcTemplate.update("""
@@ -156,7 +156,7 @@ public class DlqReplayService {
         postgresJdbcTemplate.update("""
                 UPDATE dead_letter_queue
                 SET resolved_at = NOW(), resolved_by = ?, resolve_trace_id = ?, resolve_reason = 'MANUAL_RESOLVE'
-                WHERE dlq_item_id = ?::uuid
+                WHERE dlq_id = ?::uuid
                 """, operatorId, traceId, dlqItemId);
 
         log.info("DlqReplayService: MARK_RESOLVED dlqItemId={} traceId={}", dlqItemId, traceId);

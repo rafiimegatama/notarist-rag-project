@@ -29,7 +29,7 @@ public class InferenceQueueIsolation {
                 r -> { Thread t = new Thread(r, "llm-inference"); t.setDaemon(true); return t; },
                 new ThreadPoolExecutor.AbortPolicy());    // reject when full — caller handles
 
-        Gauge.builder("notarist.runtime.inference.queue.size", executor, ThreadPoolExecutor::getQueue)
+        Gauge.builder("notarist.runtime.inference.queue.size", executor, e -> (double) e.getQueue().size())
                 .description("LLM inference queue depth")
                 .register(meterRegistry);
         Gauge.builder("notarist.runtime.inference.active.threads", executor, ThreadPoolExecutor::getActiveCount)

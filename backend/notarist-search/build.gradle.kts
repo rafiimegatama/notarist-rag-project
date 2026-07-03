@@ -8,6 +8,7 @@ dependencies {
     implementation(libs.postgresql)
     implementation(libs.qdrant.client)
     implementation(libs.jackson.databind)
+    implementation(libs.micrometer.prometheus)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers.postgresql)

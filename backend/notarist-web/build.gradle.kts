@@ -30,6 +30,7 @@ dependencies {
     implementation(libs.logback.json.classic)
     implementation(libs.logback.jackson)
     implementation(libs.jackson.datatype.jsr310)
+    implementation(libs.springdoc.openapi.webmvc)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers.postgresql)

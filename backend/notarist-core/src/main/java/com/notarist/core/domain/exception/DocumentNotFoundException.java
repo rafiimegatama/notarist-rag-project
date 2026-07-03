@@ -9,6 +9,10 @@ public class DocumentNotFoundException extends NotaristException {
               "Document dengan ID '" + documentId + "' tidak ditemukan.");
     }
 
+    public DocumentNotFoundException(String errorCode, String message) {
+        super(errorCode, message);
+    }
+
     public DocumentNotFoundException(String message) {
         super("DOCUMENT_NOT_FOUND", message);
     }

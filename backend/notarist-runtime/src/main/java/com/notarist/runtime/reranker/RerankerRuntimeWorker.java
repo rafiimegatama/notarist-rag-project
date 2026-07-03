@@ -86,7 +86,7 @@ public class RerankerRuntimeWorker implements RerankerPort {
             log.debug("RerankerRuntimeWorker: reranked {} → {} topK={} durationMs={}",
                     candidates.size(), result.size(), DEFAULT_TOP_K, durationMs);
             return result.stream()
-                    .map(r -> new RerankerPort.RerankResult(r.chunkId(), r.score()))
+                    .map(r -> new RerankerPort.RerankResult(r.chunkId(), (double) r.score()))
                     .toList();
 
         } catch (TimeoutCancellationOrchestrator.TimeoutException e) {
@@ -117,10 +117,10 @@ public class RerankerRuntimeWorker implements RerankerPort {
                 new HttpEntity<>(body, headers), Map.class);
 
         Map<String, Object> result = response.getBody();
-        if (result == null) return passthroughRank(candidates, topK);
+        if (result == null) return List.of();
 
         List<Map<String, Object>> results = (List<Map<String, Object>>) result.get("results");
-        if (results == null) return passthroughRank(candidates, topK);
+        if (results == null) return List.of();
 
         List<RankedCandidate> ranked = new ArrayList<>();
         for (Map<String, Object> item : results) {
@@ -137,7 +137,7 @@ public class RerankerRuntimeWorker implements RerankerPort {
     private List<RerankerPort.RerankResult> passthroughRank(List<RerankerPort.RerankCandidate> candidates) {
         int limit = Math.min(DEFAULT_TOP_K, candidates.size());
         return candidates.subList(0, limit).stream()
-                .map(c -> new RerankerPort.RerankResult(c.chunkId(), DEGRADED_SCORE))
+                .map(c -> new RerankerPort.RerankResult(c.chunkId(), (double) DEGRADED_SCORE))
                 .toList();
     }
 }

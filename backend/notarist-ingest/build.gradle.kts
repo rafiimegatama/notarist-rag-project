@@ -11,6 +11,8 @@ dependencies {
     implementation(libs.flyway.postgresql)
     implementation(libs.minio)
     implementation(libs.jackson.databind)
+    implementation(libs.spring.boot.starter.data.jpa)
+    implementation(libs.micrometer.prometheus)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers.postgresql)

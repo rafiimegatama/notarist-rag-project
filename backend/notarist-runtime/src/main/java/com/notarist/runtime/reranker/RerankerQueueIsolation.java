@@ -30,7 +30,7 @@ public class RerankerQueueIsolation {
                 r -> { Thread t = new Thread(r, "reranker-runtime"); t.setDaemon(true); return t; },
                 new ThreadPoolExecutor.CallerRunsPolicy());
 
-        Gauge.builder("notarist.runtime.reranker.queue.size", executor, ThreadPoolExecutor::getQueue)
+        Gauge.builder("notarist.runtime.reranker.queue.size", executor, e -> (double) e.getQueue().size())
                 .description("Reranker queue depth")
                 .register(meterRegistry);
         Gauge.builder("notarist.runtime.reranker.active.threads", executor, ThreadPoolExecutor::getActiveCount)

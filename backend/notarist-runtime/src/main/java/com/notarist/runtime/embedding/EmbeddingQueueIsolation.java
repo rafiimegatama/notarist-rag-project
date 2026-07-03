@@ -30,7 +30,7 @@ public class EmbeddingQueueIsolation {
                 r -> { Thread t = new Thread(r, "embedding-runtime"); t.setDaemon(true); return t; },
                 new ThreadPoolExecutor.CallerRunsPolicy());
 
-        Gauge.builder("notarist.runtime.embedding.queue.size", executor, ThreadPoolExecutor::getQueue)
+        Gauge.builder("notarist.runtime.embedding.queue.size", executor, e -> (double) e.getQueue().size())
                 .description("Embedding queue depth")
                 .register(meterRegistry);
         Gauge.builder("notarist.runtime.embedding.active.threads", executor, ThreadPoolExecutor::getActiveCount)

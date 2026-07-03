@@ -11,6 +11,7 @@ dependencies {
     implementation(libs.postgresql)
     implementation(libs.reactor.core)
     implementation(libs.jackson.databind)
+    implementation(libs.micrometer.prometheus)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.mockito.core)

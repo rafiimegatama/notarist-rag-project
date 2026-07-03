@@ -1,12 +1,10 @@
 package com.notarist.infra.qdrant;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
-
-import java.time.Duration;
 
 @Configuration
 @EnableConfigurationProperties(QdrantProperties.class)
@@ -17,11 +15,11 @@ public class QdrantClientConfig {
      * Separate from any other RestTemplate beans to avoid timeout cross-contamination.
      */
     @Bean("qdrantRestTemplate")
-    public RestTemplate qdrantRestTemplate(QdrantProperties props, RestTemplateBuilder builder) {
-        RestTemplate template = builder
-                .connectTimeout(Duration.ofMillis(props.connectTimeoutMs()))
-                .readTimeout(Duration.ofMillis(props.searchTimeoutMs()))
-                .build();
+    public RestTemplate qdrantRestTemplate(QdrantProperties props) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout((int) props.connectTimeoutMs());
+        factory.setReadTimeout((int) props.searchTimeoutMs());
+        RestTemplate template = new RestTemplate(factory);
 
         if (props.apiKey() != null && !props.apiKey().isBlank()) {
             template.getInterceptors().add((request, body, execution) -> {

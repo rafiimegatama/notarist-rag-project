@@ -46,7 +46,7 @@ public class MigrationConsistencyValidator {
             int                  pendingFlywayCount,
             int                  failedFlywayCount
     ) {
-        public static MigrationReport valid() {
+        public static MigrationReport healthy() {
             return new MigrationReport(true, false, List.of(), 0, 0);
         }
 

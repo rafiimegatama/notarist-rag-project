@@ -8,6 +8,8 @@ import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
 
+import java.util.Arrays;
+
 /**
  * Health indicator exposing PostgreSQL Flyway migration state.
  * DOWN if there are pending or failed migrations.
@@ -25,7 +27,9 @@ public class MigrationHealthIndicator implements HealthIndicator {
     public Health health() {
         try {
             MigrationInfo[] pending  = flywaySearch.info().pending();
-            MigrationInfo[] failed   = flywaySearch.info().failed();
+            MigrationInfo[] failed   = Arrays.stream(flywaySearch.info().all())
+                    .filter(m -> m.getState() == MigrationState.FAILED)
+                    .toArray(MigrationInfo[]::new);
             MigrationInfo   current  = flywaySearch.info().current();
 
             if (failed.length > 0) {

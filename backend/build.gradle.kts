@@ -1,7 +1,6 @@
 plugins {
     java
     id("org.springframework.boot") version "3.2.5" apply false
-    id("io.spring.dependency-management") version "1.1.5" apply false
 }
 
 allprojects {
@@ -11,7 +10,6 @@ allprojects {
 
 subprojects {
     apply(plugin = "java")
-    apply(plugin = "io.spring.dependency-management")
 
     java {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -33,10 +31,11 @@ subprojects {
         }
     }
 
-    dependencyManagement {
-        imports {
-            mavenBom("org.springframework.boot:spring-boot-dependencies:3.2.5")
-        }
+    // Use Spring Boot BOM via platform() — avoids io.spring.dependency-management
+    // Kotlin DSL accessor issue when plugin is applied via apply(plugin=...) in subprojects block
+    dependencies {
+        "implementation"(platform("org.springframework.boot:spring-boot-dependencies:3.2.5"))
+        "annotationProcessor"(platform("org.springframework.boot:spring-boot-dependencies:3.2.5"))
     }
 
     tasks.withType<JavaCompile> {

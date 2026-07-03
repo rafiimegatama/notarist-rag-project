@@ -3,6 +3,7 @@ dependencies {
     implementation(project(":notarist-ingest"))
     implementation(project(":notarist-search"))
 
+    implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.data.jpa)
     implementation(libs.spring.boot.starter.jdbc)
     implementation(libs.spring.boot.starter.actuator)

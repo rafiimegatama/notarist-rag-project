@@ -33,7 +33,7 @@ public class OcrRuntimeIsolation {
                 r -> { Thread t = new Thread(r, "ocr-runtime"); t.setDaemon(true); return t; },
                 new ThreadPoolExecutor.CallerRunsPolicy());
 
-        Gauge.builder("notarist.runtime.ocr.queue.size", executor, ThreadPoolExecutor::getQueue)
+        Gauge.builder("notarist.runtime.ocr.queue.size", executor, e -> (double) e.getQueue().size())
                 .description("OCR queue depth")
                 .register(meterRegistry);
         Gauge.builder("notarist.runtime.ocr.active.threads", executor, ThreadPoolExecutor::getActiveCount)

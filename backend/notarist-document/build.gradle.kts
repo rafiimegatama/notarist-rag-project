@@ -7,6 +7,7 @@ dependencies {
     implementation(libs.spring.boot.starter.validation)
     implementation(libs.ojdbc11)
     implementation(libs.postgresql)
+    implementation(libs.swagger.annotations)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers.oracle.xe)

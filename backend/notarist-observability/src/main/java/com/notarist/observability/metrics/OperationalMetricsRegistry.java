@@ -98,7 +98,7 @@ public class OperationalMetricsRegistry {
      * Call once per queue at startup from the isolation component.
      */
     public void registerQueueDepthGauge(String queueName, java.util.function.Supplier<Integer> depthSupplier) {
-        Gauge.builder("notarist.ops.queue.depth", depthSupplier, Supplier::get)
+        Gauge.builder("notarist.ops.queue.depth", depthSupplier, s -> (double) s.get())
                 .tag("queue", queueName)
                 .description("Current depth of the named processing queue")
                 .register(meterRegistry);

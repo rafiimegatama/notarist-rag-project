@@ -15,4 +15,8 @@ public record ApiResponse<T>(
     public static <T> ApiResponse<T> error(ApiMeta meta, String errorCode, String errorMessage) {
         return new ApiResponse<>("ERROR", meta, null, errorCode, errorMessage);
     }
+
+    public static <T> ApiResponse<T> error(ApiMeta meta, ApiError error) {
+        return new ApiResponse<>("ERROR", meta, null, error.code(), error.message());
+    }
 }

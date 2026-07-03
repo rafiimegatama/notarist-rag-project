@@ -2,15 +2,12 @@ package com.notarist.observability.config;
 
 import com.notarist.observability.circuit.CircuitBreakerRegistry;
 import com.notarist.observability.degradation.OperationalDegradationHierarchy;
-import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
-
-import java.time.Duration;
 
 /**
  * Wires observability and resilience beans.
@@ -43,11 +40,11 @@ public class ResilienceConfig {
     }
 
     @Bean("observabilityRestTemplate")
-    public RestTemplate observabilityRestTemplate(RestTemplateBuilder builder) {
-        return builder
-                .connectTimeout(Duration.ofSeconds(5))
-                .readTimeout(Duration.ofSeconds(10))
-                .build();
+    public RestTemplate observabilityRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5_000);
+        factory.setReadTimeout(10_000);
+        return new RestTemplate(factory);
     }
 
     /**

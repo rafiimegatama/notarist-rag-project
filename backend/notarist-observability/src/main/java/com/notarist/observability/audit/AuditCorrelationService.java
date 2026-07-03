@@ -79,7 +79,7 @@ public class AuditCorrelationService {
         }
     }
 
-    private final ConcurrentHashMap<String, AuditCorrelationRecord.Builder> inProgress =
+    private final ConcurrentHashMap<String, Builder> inProgress =
             new ConcurrentHashMap<>();
 
     public static final class Builder {

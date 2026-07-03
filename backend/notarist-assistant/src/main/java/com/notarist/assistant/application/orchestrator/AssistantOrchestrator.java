@@ -212,7 +212,8 @@ public class AssistantOrchestrator implements AssistantUseCase {
                 "(Tidak ada sumber yang dapat dikutip)",
                 "INSUFFICIENT — tidak ada dokumen yang cukup untuk mendukung jawaban",
                 List.of("Grounding tidak cukup untuk memberikan jawaban yang dapat dipercaya."),
-                followUpService.suggest(command.rawQuery(), ""),
+                followUpService.suggest(command.rawQuery(), "").stream()
+                        .map(FollowUpSuggestion::questionText).collect(Collectors.toList()),
                 confidence,
                 0f,
                 true,

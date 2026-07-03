@@ -10,6 +10,7 @@ dependencies {
     implementation(libs.jjwt.impl)
     implementation(libs.jjwt.jackson)
     implementation(libs.postgresql)
+    implementation(libs.swagger.annotations)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.mockito.core)

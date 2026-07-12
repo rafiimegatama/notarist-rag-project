@@ -78,7 +78,8 @@ public class AuthenticateUserHandler implements AuthenticateUserUseCase {
                 (int) jwtService.getAccessTokenTtlSeconds(),
                 user.getUserId().value(),
                 roles,
-                user.getTenantId()
+                user.getTenantId(),
+                session.getSessionId().value()
         );
     }
 

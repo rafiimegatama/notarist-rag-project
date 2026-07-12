@@ -4,15 +4,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * Qdrant connection properties.
- * Bound from spring.qdrant.* in application.yml.
+ * Bound from notarist.storage.qdrant.* in application.yaml (url, api-key, collection).
  */
 @ConfigurationProperties(prefix = "notarist.storage.qdrant")
 public record QdrantProperties(
-        String host,
-        int port,
-        String grpcPort,
+        String url,
         String apiKey,
-        String collectionName,
+        String collection,
         int connectTimeoutMs,
         int searchTimeoutMs,
         int upsertTimeoutMs,
@@ -20,9 +18,8 @@ public record QdrantProperties(
         float defaultMinScore
 ) {
     public QdrantProperties {
-        if (host == null || host.isBlank())           host = "localhost";
-        if (port <= 0)                                port = 6333;
-        if (collectionName == null || collectionName.isBlank()) collectionName = "notarist-chunks";
+        if (url == null || url.isBlank())               url = "http://localhost:6333";
+        if (collection == null || collection.isBlank()) collection = "notarist-chunks";
         if (connectTimeoutMs <= 0) connectTimeoutMs = 3_000;
         if (searchTimeoutMs  <= 0) searchTimeoutMs  = 5_000;
         if (upsertTimeoutMs  <= 0) upsertTimeoutMs  = 10_000;
@@ -31,10 +28,14 @@ public record QdrantProperties(
     }
 
     public String baseUrl() {
-        return "http://" + host + ":" + port;
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+    }
+
+    public String collectionName() {
+        return collection;
     }
 
     public String collectionUrl() {
-        return baseUrl() + "/collections/" + collectionName;
+        return baseUrl() + "/collections/" + collection;
     }
 }

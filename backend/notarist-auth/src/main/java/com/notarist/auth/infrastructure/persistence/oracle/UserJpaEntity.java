@@ -34,7 +34,8 @@ public class UserJpaEntity {
     @Column(name = "CREATED_AT", nullable = false, updatable = false)
     private Instant createdAt;
 
-    @OneToMany(mappedBy = "userId", cascade = CascadeType.ALL, fetch = FetchType.EAGER, orphanRemoval = true)
+    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER, orphanRemoval = true)
+    @JoinColumn(name = "USER_ID", referencedColumnName = "USER_ID")
     private List<UserRoleJpaEntity> roles = new ArrayList<>();
 
     protected UserJpaEntity() {}

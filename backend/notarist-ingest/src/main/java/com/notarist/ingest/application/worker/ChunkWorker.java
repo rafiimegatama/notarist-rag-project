@@ -1,5 +1,6 @@
 package com.notarist.ingest.application.worker;
 
+import com.notarist.core.domain.policy.OcrReviewStatus;
 import com.notarist.core.domain.valueobject.ChunkId;
 import com.notarist.core.util.NotaristConstants;
 import com.notarist.ingest.domain.exception.IngestionStageException;
@@ -81,6 +82,9 @@ public class ChunkWorker implements StageWorker {
                     new ChunkId(UUID.randomUUID()),
                     job.getIngestionId(),
                     job.getDocumentId(),
+                    job.getTenantId(),
+                    job.getDocumentType(),
+                    job.getClassificationLevel(),
                     i,
                     startOffset,
                     startOffset + targetTokens,
@@ -90,7 +94,14 @@ public class ChunkWorker implements StageWorker {
                     null,
                     null,
                     null,
+                    "[STUB] chunk text for ingestionId=" + job.getIngestionId(),
                     "notarist-ocr/" + job.getTenantId() + "/" + job.getDocumentId().value() + ".txt",
+                    0f,
+                    OcrReviewStatus.LOW_CONFIDENCE_REVIEW,
+                    false,
+                    null,
+                    null,
+                    null,
                     null
             );
             chunks.add(chunk);

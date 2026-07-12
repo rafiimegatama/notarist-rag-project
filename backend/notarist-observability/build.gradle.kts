@@ -1,5 +1,9 @@
 dependencies {
     implementation(project(":notarist-core"))
+    // Needed to read real degradation state from DegradedModeRegistry (see
+    // OperationalDegradationHierarchy / HealthAggregationService). notarist-infra does not
+    // depend on notarist-observability, so this direction is not circular.
+    implementation(project(":notarist-infra"))
 
     implementation(libs.spring.boot.starter.actuator)
     implementation(libs.spring.boot.starter.web)

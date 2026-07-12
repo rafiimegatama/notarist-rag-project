@@ -1,6 +1,5 @@
 package com.notarist.observability.health;
 
-import com.notarist.observability.circuit.CircuitBreakerRegistry;
 import com.notarist.observability.consistency.SnapshotReadinessChecker;
 import com.notarist.observability.dashboard.OperationalDashboardDto;
 import com.notarist.observability.ops.OperationalCliFacade;
@@ -140,11 +139,10 @@ public class OperationalHealthEndpoint {
         if (health.status() != HealthAggregationService.SystemHealthStatus.UP) {
             warnings.add("System is " + health.status().name() + ": " + health.degradationLevel().description);
         }
-        health.circuitStates().forEach((integration, state) -> {
-            if (state == CircuitBreakerRegistry.State.OPEN) {
-                warnings.add("Circuit OPEN: " + integration.name());
-            } else if (state == CircuitBreakerRegistry.State.HALF_OPEN) {
-                warnings.add("Circuit HALF_OPEN (probing): " + integration.name());
+        health.circuitStates().forEach((service, state) -> {
+            if (state.degraded()) {
+                warnings.add("Service DEGRADED: " + service.name()
+                        + (state.reason() != null ? " (" + state.reason() + ")" : ""));
             }
         });
         if (!health.snapshotReady()) {

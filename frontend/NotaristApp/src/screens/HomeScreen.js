@@ -29,10 +29,11 @@ export default function HomeScreen({ navigation }) {
   const loadStats = async () => {
     try {
       const data = await listDocuments(0, 1);
+      const total = data.data?.page?.totalElements ?? 0;
       setStats({
-        total: data.meta?.totalElements ?? 0,
+        total,
         processing: 0,
-        ready: data.meta?.totalElements ?? 0,
+        ready: total,
       });
     } catch (_) {
       // backend may not be running — show zeros

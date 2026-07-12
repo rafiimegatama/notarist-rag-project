@@ -10,7 +10,8 @@ public record TokenResponse(
     int expiresIn,
     UUID userId,
     List<String> roles,
-    UUID tenantId
+    UUID tenantId,
+    UUID sessionId
 ) {
     public TokenResponse {
         tokenType = "Bearer";

@@ -1,7 +1,7 @@
 package com.notarist.runtime.ocr;
 
-import com.notarist.infra.ocr.OcrConfidencePolicy;
-import com.notarist.infra.ocr.OcrReviewStatus;
+import com.notarist.core.domain.policy.OcrConfidencePolicy;
+import com.notarist.core.domain.policy.OcrReviewStatus;
 import com.notarist.ingest.application.port.out.OcrServicePort;
 import com.notarist.runtime.degradation.RuntimeDegradationManager;
 import com.notarist.runtime.metrics.RuntimeMetricsRegistry;

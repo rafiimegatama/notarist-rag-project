@@ -1,4 +1,4 @@
-package com.notarist.infra.ocr;
+package com.notarist.core.domain.policy;
 
 /**
  * OCR review status for legal documents.
@@ -7,7 +7,7 @@ package com.notarist.infra.ocr;
  * LOW_CONFIDENCE_REVIEW — confidence [0.40, 0.80); queued for human review; is_searchable=false
  * REJECTED           — confidence < 0.40; document must be re-scanned; not indexed
  *
- * Stored on IngestionJob and propagated to Qdrant payload via is_searchable flag.
+ * Stored on IngestionJob and propagated to the chunk index / Qdrant payload via is_searchable flag.
  */
 public enum OcrReviewStatus {
 

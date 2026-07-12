@@ -65,6 +65,13 @@ public class DegradedModeRegistry {
         return state.get(service);
     }
 
+    /** Snapshot of current state for every tracked service — used by health/degradation reporting. */
+    public Map<ExternalService, DegradedState> snapshotStates() {
+        Map<ExternalService, DegradedState> snapshot = new EnumMap<>(ExternalService.class);
+        snapshot.putAll(state);
+        return snapshot;
+    }
+
     public record DegradedState(
             boolean degraded,
             Instant degradedSince,

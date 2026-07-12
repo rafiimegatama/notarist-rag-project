@@ -1,6 +1,6 @@
 package com.notarist.observability.dashboard;
 
-import com.notarist.observability.circuit.CircuitBreakerRegistry;
+import com.notarist.infra.resilience.DegradedModeRegistry;
 import com.notarist.observability.degradation.OperationalDegradationHierarchy;
 import com.notarist.observability.health.HealthAggregationService;
 
@@ -42,12 +42,12 @@ public final class OperationalDashboardDto {
             String state,
             boolean healthy
     ) {
-        public static CircuitBreakerDto from(CircuitBreakerRegistry.Integration integration,
-                                              CircuitBreakerRegistry.State state) {
+        public static CircuitBreakerDto from(DegradedModeRegistry.ExternalService service,
+                                              DegradedModeRegistry.DegradedState state) {
             return new CircuitBreakerDto(
-                    integration.name(),
-                    state.name(),
-                    state == CircuitBreakerRegistry.State.CLOSED
+                    service.name(),
+                    state.degraded() ? "DEGRADED" : "HEALTHY",
+                    !state.degraded()
             );
         }
     }

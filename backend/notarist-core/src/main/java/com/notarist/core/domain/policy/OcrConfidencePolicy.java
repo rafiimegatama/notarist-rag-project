@@ -1,13 +1,12 @@
-package com.notarist.infra.ocr;
+package com.notarist.core.domain.policy;
 
 /**
  * OCR confidence policy for the legal document domain.
  *
  * Legal documents require higher accuracy than general-purpose OCR.
  * A chunk with low OCR confidence MUST NOT be made searchable immediately:
- *   - it goes into LOW_CONFIDENCE_REVIEW queue (is_searchable = false in Qdrant)
+ *   - it goes into LOW_CONFIDENCE_REVIEW queue (is_searchable = false in chunk_index / Qdrant)
  *   - a notaris or authorized reviewer must approve it before it becomes searchable
- *   - in QdrantIndexAdapter, is_searchable is set based on OcrReviewStatus
  *
  * Thresholds:
  *   ACCEPTED (>=0.80): high enough for direct indexing in legal domain

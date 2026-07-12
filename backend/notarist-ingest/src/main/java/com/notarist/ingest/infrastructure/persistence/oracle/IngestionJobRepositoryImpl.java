@@ -37,6 +37,7 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
 
     @Override
     public void save(IngestionJob job) {
+        vpdContextApplier.applyIfPresent(entityManager);
         jpaRepository.findById(job.getIngestionId().value().toString())
                 .map(existing -> updateEntity(existing, job))
                 .ifPresentOrElse(
@@ -138,6 +139,8 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
                 entity.getLastErrorHash(),
                 entity.getNextRetryAt(),
                 entity.getDeadLetterReason(),
+                null, // ocrConfidence — no IngestionJobJpaEntity column yet; not persisted
+                null, // ocrObjectKey — no IngestionJobJpaEntity column yet; not persisted
                 entity.getCreatedAt(),
                 entity.getUpdatedAt(),
                 entity.getCompletedAt());

@@ -48,13 +48,14 @@ public final class PipelineStateMachine {
         };
     }
 
-    /** Returns the COMPLETED counterpart for a PENDING stage. */
+    /** Returns the status a job should transition to once the given PENDING stage's processing succeeds. */
     public static PipelineStatus completedStageFor(PipelineStatus pendingStage) {
         return switch (pendingStage) {
             case OCR_PENDING    -> PipelineStatus.OCR_COMPLETED;
             case NER_PENDING    -> PipelineStatus.NER_COMPLETED;
             case CHUNK_PENDING  -> PipelineStatus.CHUNK_COMPLETED;
-            case EMBED_PENDING, INDEX_PENDING -> PipelineStatus.COMPLETED;
+            case EMBED_PENDING  -> PipelineStatus.INDEX_PENDING;
+            case INDEX_PENDING  -> PipelineStatus.COMPLETED;
             default -> throw new IllegalArgumentException("No completed stage for: " + pendingStage);
         };
     }

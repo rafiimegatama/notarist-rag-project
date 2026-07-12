@@ -8,23 +8,41 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { listDocuments, initiateUpload } from '../api/documents';
+import { listDocuments, initiateUpload, uploadFileToSignedUrl, confirmUpload, computeFileSha256 } from '../api/documents';
 
 const DOC_TYPE_LABELS = {
   AKTA: 'Akta',
-  SERTIFIKAT: 'Sertifikat',
-  SOP: 'SOP',
   REGULASI: 'Regulasi',
-  FIDUSIA: 'Fidusia',
+  SOP: 'SOP',
+};
+
+const DOCUMENT_TYPES = ['AKTA', 'REGULASI', 'SOP'];
+const CLASSIFICATION_LEVELS = ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'STRICTLY_CONFIDENTIAL'];
+const CLASSIFICATION_LABELS = {
+  PUBLIC: 'Publik',
+  INTERNAL: 'Internal',
+  CONFIDENTIAL: 'Rahasia',
+  STRICTLY_CONFIDENTIAL: 'Sangat Rahasia',
 };
 
 const STATUS_COLORS = {
-  INDEXED: '#10B981',
-  PROCESSING: '#F59E0B',
   UPLOADED: '#3B82F6',
+  OCR_QUEUE: '#F59E0B',
+  OCR_PROCESSING: '#F59E0B',
+  NER_QUEUE: '#F59E0B',
+  NER_PROCESSING: '#F59E0B',
+  CHUNKING_QUEUE: '#F59E0B',
+  CHUNKING_PROCESSING: '#F59E0B',
+  EMBEDDING_QUEUE: '#F59E0B',
+  EMBEDDING_PROCESSING: '#F59E0B',
+  INDEXING_QUEUE: '#F59E0B',
+  INDEXING_PROCESSING: '#F59E0B',
+  INDEXED: '#10B981',
   FAILED: '#EF4444',
+  DLQ: '#991B1B',
 };
 
 function DocumentCard({ doc, onPress }) {
@@ -32,7 +50,7 @@ function DocumentCard({ doc, onPress }) {
   return (
     <TouchableOpacity style={styles.card} onPress={() => onPress(doc)}>
       <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle} numberOfLines={1}>{doc.originalFilename}</Text>
+        <Text style={styles.cardTitle} numberOfLines={1}>{doc.documentTitle}</Text>
         <View style={[styles.badge, { backgroundColor: statusColor + '22', borderColor: statusColor }]}>
           <Text style={[styles.badgeText, { color: statusColor }]}>{doc.status}</Text>
         </View>
@@ -59,19 +77,23 @@ export default function DocumentsScreen({ navigation }) {
   const [uploading, setUploading] = useState(false);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [pendingFile, setPendingFile] = useState(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [selectedDocType, setSelectedDocType] = useState('AKTA');
+  const [selectedClassification, setSelectedClassification] = useState('INTERNAL');
 
   const loadDocuments = useCallback(async (reset = false) => {
     const currentPage = reset ? 0 : page;
     try {
       const data = await listDocuments(currentPage, 20);
-      const items = data.data?.content ?? [];
+      const items = data.data?.items ?? [];
       if (reset) {
         setDocuments(items);
         setPage(0);
       } else {
         setDocuments(prev => [...prev, ...items]);
       }
-      const totalPages = data.data?.totalPages ?? 1;
+      const totalPages = data.data?.page?.totalPages ?? 1;
       setHasMore(currentPage < totalPages - 1);
       if (!reset) setPage(p => p + 1);
     } catch (err) {
@@ -91,26 +113,37 @@ export default function DocumentsScreen({ navigation }) {
     loadDocuments(true);
   };
 
-  const handleUpload = async () => {
+  const handlePickFile = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/pdf', 'image/*'],
+      copyToCacheDirectory: true,
+    });
+
+    if (result.canceled) return;
+
+    setPendingFile(result.assets[0]);
+    setSelectedDocType('AKTA');
+    setSelectedClassification('INTERNAL');
+    setShowPicker(true);
+  };
+
+  const handleConfirmUpload = async () => {
+    const file = pendingFile;
+    if (!file) return;
+    setShowPicker(false);
+    setUploading(true);
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'image/*'],
-        copyToCacheDirectory: true,
-      });
+      const checksumSha256 = await computeFileSha256(file.uri);
 
-      if (result.canceled) return;
-
-      const file = result.assets[0];
-      setUploading(true);
-
-      // For now, initiate with a placeholder checksum
-      // In production, compute SHA-256 of the file before uploading
-      await initiateUpload({
+      const { jobId, signedUrl, requiredHeaders } = await initiateUpload({
         originalFilename: file.name,
-        checksumSha256: '0'.repeat(64), // placeholder — real app computes SHA-256
-        documentType: 'AKTA',
-        classificationLevel: 'INTERNAL',
+        checksumSha256,
+        documentType: selectedDocType,
+        classificationLevel: selectedClassification,
       });
+
+      await uploadFileToSignedUrl(signedUrl, file.uri, requiredHeaders);
+      await confirmUpload(jobId, checksumSha256);
 
       Alert.alert('Berhasil', 'Dokumen berhasil diunggah dan sedang diproses');
       loadDocuments(true);
@@ -119,6 +152,7 @@ export default function DocumentsScreen({ navigation }) {
       Alert.alert('Upload Gagal', msg);
     } finally {
       setUploading(false);
+      setPendingFile(null);
     }
   };
 
@@ -142,7 +176,7 @@ export default function DocumentsScreen({ navigation }) {
         keyExtractor={(item) => item.documentId || item.id || String(Math.random())}
         renderItem={({ item }) => (
           <DocumentCard doc={item} onPress={(doc) => {
-            Alert.alert(doc.originalFilename, `ID: ${doc.documentId}\nStatus: ${doc.status}`);
+            Alert.alert(doc.documentTitle, `ID: ${doc.documentId}\nStatus: ${doc.status}`);
           }} />
         )}
         contentContainerStyle={documents.length === 0 ? styles.emptyContainer : styles.listContent}
@@ -159,7 +193,7 @@ export default function DocumentsScreen({ navigation }) {
 
       <TouchableOpacity
         style={[styles.fab, uploading && styles.fabDisabled]}
-        onPress={handleUpload}
+        onPress={handlePickFile}
         disabled={uploading}
       >
         {uploading ? (
@@ -168,6 +202,56 @@ export default function DocumentsScreen({ navigation }) {
           <Text style={styles.fabIcon}>+</Text>
         )}
       </TouchableOpacity>
+
+      <Modal visible={showPicker} transparent animationType="slide" onRequestClose={() => setShowPicker(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle} numberOfLines={1}>{pendingFile?.name}</Text>
+
+            <Text style={styles.modalLabel}>Jenis Dokumen</Text>
+            <View style={styles.chipRow}>
+              {DOCUMENT_TYPES.map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[styles.chip, selectedDocType === type && styles.chipSelected]}
+                  onPress={() => setSelectedDocType(type)}
+                >
+                  <Text style={[styles.chipText, selectedDocType === type && styles.chipTextSelected]}>
+                    {DOC_TYPE_LABELS[type]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.modalLabel}>Tingkat Klasifikasi</Text>
+            <View style={styles.chipRow}>
+              {CLASSIFICATION_LEVELS.map((level) => (
+                <TouchableOpacity
+                  key={level}
+                  style={[styles.chip, selectedClassification === level && styles.chipSelected]}
+                  onPress={() => setSelectedClassification(level)}
+                >
+                  <Text style={[styles.chipText, selectedClassification === level && styles.chipTextSelected]}>
+                    {CLASSIFICATION_LABELS[level]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => { setShowPicker(false); setPendingFile(null); }}
+              >
+                <Text style={styles.modalCancelText}>Batal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalUploadBtn} onPress={handleConfirmUpload}>
+                <Text style={styles.modalUploadText}>Unggah</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -230,4 +314,72 @@ const styles = StyleSheet.create({
   },
   fabDisabled: { opacity: 0.6 },
   fabIcon: { color: '#fff', fontSize: 28, lineHeight: 32 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#1E293B',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    paddingBottom: 32,
+  },
+  modalTitle: {
+    color: '#F1F5F9',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  modalLabel: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    backgroundColor: '#0F172A',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  chipSelected: {
+    backgroundColor: '#3B82F6',
+    borderColor: '#3B82F6',
+  },
+  chipText: { color: '#94A3B8', fontSize: 13 },
+  chipTextSelected: { color: '#fff', fontWeight: '600' },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 24,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#475569',
+  },
+  modalCancelText: { color: '#94A3B8', fontWeight: '600' },
+  modalUploadBtn: {
+    flex: 1,
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    backgroundColor: '#3B82F6',
+  },
+  modalUploadText: { color: '#fff', fontWeight: '600' },
 });

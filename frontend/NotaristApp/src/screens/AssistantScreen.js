@@ -11,12 +11,13 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import * as Crypto from 'expo-crypto';
 import { askAssistant } from '../api/assistant';
 
 let sessionId = null;
 function getSessionId() {
   if (!sessionId) {
-    sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    sessionId = Crypto.randomUUID();
   }
   return sessionId;
 }
@@ -35,7 +36,7 @@ function MessageBubble({ message }) {
             <Text style={styles.citationLabel}>Sumber:</Text>
             {message.citations.map((c, i) => (
               <Text key={i} style={styles.citation}>
-                [{i + 1}] {c.filename || c.documentId}
+                [{i + 1}] {c.sectionTitle || c.documentType || c.sourceObjectKey || c.documentId}
               </Text>
             ))}
           </View>

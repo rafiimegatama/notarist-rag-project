@@ -4,14 +4,17 @@ import com.notarist.assistant.api.request.AssistantRequest;
 import com.notarist.assistant.api.response.AssistantResponse;
 import com.notarist.assistant.api.response.SseEvent;
 import com.notarist.assistant.application.command.AssistantCommand;
+import com.notarist.assistant.application.pipeline.ConversationMemoryService;
 import com.notarist.assistant.application.pipeline.ResponseStreamer;
 import com.notarist.assistant.application.port.in.AssistantUseCase;
 import com.notarist.assistant.domain.model.AssistantSafetyMode;
+import com.notarist.assistant.domain.model.ConversationTurn;
 import com.notarist.core.api.response.ApiMeta;
 import com.notarist.core.api.response.ApiResponse;
 import com.notarist.core.domain.valueobject.ClassificationLevel;
 import com.notarist.core.domain.valueobject.CorrelationId;
 import com.notarist.core.domain.valueobject.JenisDokumen;
+import com.notarist.core.security.VpdContextHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -19,6 +22,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,10 +38,15 @@ public class AssistantController {
 
     private final AssistantUseCase  assistantUseCase;
     private final ResponseStreamer  responseStreamer;
+    private final ConversationMemoryService conversationMemoryService;
 
-    public AssistantController(AssistantUseCase assistantUseCase, ResponseStreamer responseStreamer) {
+    public AssistantController(
+            AssistantUseCase assistantUseCase,
+            ResponseStreamer responseStreamer,
+            ConversationMemoryService conversationMemoryService) {
         this.assistantUseCase = assistantUseCase;
         this.responseStreamer  = responseStreamer;
+        this.conversationMemoryService = conversationMemoryService;
     }
 
     /**
@@ -47,15 +56,13 @@ public class AssistantController {
     @PostMapping("/ask")
     public ResponseEntity<ApiResponse<AssistantResponse>> ask(
             @RequestBody AssistantRequest request,
-            @RequestHeader("X-Tenant-Id") UUID tenantId,
-            @RequestHeader("X-User-Id") UUID userId,
-            @RequestHeader(value = "X-Session-Id", required = false) UUID sessionId,
             @RequestHeader(value = "X-Correlation-Id", required = false) String correlationIdHeader) {
 
+        VpdContextHolder.VpdPrincipal principal = requirePrincipal();
         CorrelationId correlationId = resolveCorrelationId(correlationIdHeader);
-        AssistantCommand command = buildCommand(request, tenantId, userId, sessionId);
+        AssistantCommand command = buildCommand(request, principal.tenantId(), principal.userId());
 
-        log.info("Assistant ask tenantId={} queryId={}", tenantId, command.queryId());
+        log.info("Assistant ask tenantId={} queryId={}", principal.tenantId(), command.queryId());
 
         AssistantResponse response = assistantUseCase.ask(command);
         ApiResponse<AssistantResponse> apiResponse = "SUCCESS".equals(response.status())
@@ -73,15 +80,13 @@ public class AssistantController {
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter askStream(
             @RequestBody AssistantRequest request,
-            @RequestHeader("X-Tenant-Id") UUID tenantId,
-            @RequestHeader("X-User-Id") UUID userId,
-            @RequestHeader(value = "X-Session-Id", required = false) UUID sessionId,
             @RequestHeader(value = "X-Correlation-Id", required = false) String correlationIdHeader) {
 
+        VpdContextHolder.VpdPrincipal principal = requirePrincipal();
         SseEmitter emitter = new SseEmitter(60_000L);
-        AssistantCommand command = buildCommand(request, tenantId, userId, sessionId);
+        AssistantCommand command = buildCommand(request, principal.tenantId(), principal.userId());
 
-        log.info("Assistant stream tenantId={} queryId={}", tenantId, command.queryId());
+        log.info("Assistant stream tenantId={} queryId={}", principal.tenantId(), command.queryId());
 
         SSE_POOL.submit(() -> {
             try {
@@ -101,7 +106,31 @@ public class AssistantController {
         return emitter;
     }
 
-    private AssistantCommand buildCommand(AssistantRequest request, UUID tenantId, UUID userId, UUID sessionId) {
+    /**
+     * GET /api/v1/assistant/history/{sessionId}
+     * Returns the caller's tenant-scoped conversation turns for a session (in-memory, see ConversationMemoryService).
+     */
+    @GetMapping("/history/{sessionId}")
+    public ResponseEntity<ApiResponse<List<ConversationTurn>>> history(
+            @PathVariable UUID sessionId,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationIdHeader) {
+
+        VpdContextHolder.VpdPrincipal principal = requirePrincipal();
+        CorrelationId correlationId = resolveCorrelationId(correlationIdHeader);
+
+        List<ConversationTurn> turns = conversationMemoryService.getHistory(sessionId).stream()
+                .filter(turn -> turn.tenantId().equals(principal.tenantId()))
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.success(ApiMeta.of(correlationId.value()), turns));
+    }
+
+    private VpdContextHolder.VpdPrincipal requirePrincipal() {
+        return VpdContextHolder.get()
+                .orElseThrow(() -> new IllegalStateException("Unauthenticated request"));
+    }
+
+    private AssistantCommand buildCommand(AssistantRequest request, UUID tenantId, UUID userId) {
         ClassificationLevel level = parseEnum(request.maxClassificationLevel(),
                 ClassificationLevel.class, ClassificationLevel.INTERNAL);
         JenisDokumen docType = parseEnum(request.documentTypeFilter(),
@@ -112,6 +141,7 @@ public class AssistantController {
         int maxResults    = (request.maxResults() != null && request.maxResults() > 0) ? request.maxResults() : 10;
         int tokenBudget   = (request.contextTokenBudget() != null && request.contextTokenBudget() > 0)
                 ? request.contextTokenBudget() : 3072;
+        UUID sessionId    = parseUuid(request.sessionId());
 
         return new AssistantCommand(
                 UUID.randomUUID(), sessionId, tenantId, userId,
@@ -121,6 +151,15 @@ public class AssistantController {
 
     private CorrelationId resolveCorrelationId(String header) {
         return (header != null && !header.isBlank()) ? CorrelationId.of(header) : CorrelationId.generate();
+    }
+
+    private UUID parseUuid(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return UUID.fromString(value);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private <T extends Enum<T>> T parseEnum(String value, Class<T> enumClass, T defaultValue) {

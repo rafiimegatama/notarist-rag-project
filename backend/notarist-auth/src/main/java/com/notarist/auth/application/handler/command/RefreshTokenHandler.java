@@ -88,7 +88,8 @@ public class RefreshTokenHandler implements RefreshTokenUseCase {
                 (int) jwtService.getAccessTokenTtlSeconds(),
                 user.getUserId().value(),
                 roles,
-                user.getTenantId()
+                user.getTenantId(),
+                newSession.getSessionId().value()
         );
     }
 }

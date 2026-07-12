@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { login, logout, getStoredToken } from '../api/auth';
+import { setAuthFailureHandler } from '../api/client';
 
 const AuthContext = createContext(null);
 
@@ -17,9 +18,14 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
+  useEffect(() => {
+    setAuthFailureHandler(() => setUser(null));
+    return () => setAuthFailureHandler(null);
+  }, []);
+
   const signIn = async (username, password) => {
     const data = await login(username, password);
-    setUser({ token: data.token, ...data });
+    setUser({ token: data.accessToken, ...data });
     return data;
   };
 

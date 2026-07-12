@@ -34,7 +34,7 @@ public class PostgresConnectionConfig {
         config.setPassword(props.password());
         config.setDriverClassName(props.driverClassName());
         config.setMinimumIdle(props.minimumIdle());
-        config.setMaximumPoolSize(props.maximumPoolSize());
+        config.setMaximumPoolSize(props.poolMax());
         config.setConnectionTimeout(props.connectionTimeoutMs());
         config.setIdleTimeout(props.idleTimeoutMs());
         config.setMaxLifetime(props.maxLifetimeMs());

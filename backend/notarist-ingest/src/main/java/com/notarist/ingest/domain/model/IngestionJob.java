@@ -37,6 +37,9 @@ public class IngestionJob {
     private Instant nextRetryAt;
     private String deadLetterReason;
 
+    private Float ocrConfidence;
+    private String ocrObjectKey;
+
     private Instant createdAt;
     private Instant updatedAt;
     private Instant completedAt;
@@ -49,7 +52,8 @@ public class IngestionJob {
             String originalFilename, PipelineStatus pipelineStatus, JobStatus overallStatus,
             List<StageRecord> stageHistory, String failureStage, int retryCount,
             String lastErrorCode, String lastErrorHash, Instant nextRetryAt,
-            String deadLetterReason, Instant createdAt, Instant updatedAt, Instant completedAt) {
+            String deadLetterReason, Float ocrConfidence, String ocrObjectKey,
+            Instant createdAt, Instant updatedAt, Instant completedAt) {
 
         IngestionJob job = new IngestionJob(ingestionId, jobId, documentId, tenantId, uploadedBy,
                 checksum, documentType, classificationLevel, originalFilename);
@@ -63,6 +67,8 @@ public class IngestionJob {
         job.lastErrorHash = lastErrorHash;
         job.nextRetryAt = nextRetryAt;
         job.deadLetterReason = deadLetterReason;
+        job.ocrConfidence = ocrConfidence;
+        job.ocrObjectKey = ocrObjectKey;
         job.createdAt = createdAt;
         job.updatedAt = updatedAt;
         job.completedAt = completedAt;

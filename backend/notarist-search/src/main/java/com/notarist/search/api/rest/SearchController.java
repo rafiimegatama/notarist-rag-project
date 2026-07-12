@@ -4,6 +4,7 @@ import com.notarist.core.api.response.ApiMeta;
 import com.notarist.core.api.response.ApiResponse;
 import com.notarist.core.domain.valueobject.ClassificationLevel;
 import com.notarist.core.domain.valueobject.CorrelationId;
+import com.notarist.core.security.VpdContextHolder;
 import com.notarist.search.api.request.SearchRequest;
 import com.notarist.search.api.response.SearchResponse;
 import com.notarist.search.application.port.in.SearchUseCase;
@@ -30,15 +31,19 @@ public class SearchController {
     /**
      * POST /api/v1/search
      *
-     * Tenant and user identity are resolved from mandatory headers (set by API gateway
-     * or auth filter). Classification level defaults to INTERNAL when not specified.
+     * Tenant and user identity are resolved from the authenticated principal
+     * (VpdContextHolder, populated by JwtAuthenticationFilter from the bearer token).
+     * Classification level defaults to INTERNAL when not specified.
      */
     @PostMapping
     public ResponseEntity<ApiResponse<SearchResponse>> search(
             @RequestBody SearchRequest request,
-            @RequestHeader("X-Tenant-Id") UUID tenantId,
-            @RequestHeader("X-User-Id") UUID userId,
             @RequestHeader(value = "X-Correlation-Id", required = false) String correlationIdHeader) {
+
+        VpdContextHolder.VpdPrincipal principal = VpdContextHolder.get()
+                .orElseThrow(() -> new IllegalStateException("Unauthenticated request"));
+        UUID tenantId = principal.tenantId();
+        UUID userId = principal.userId();
 
         CorrelationId correlationId = correlationIdHeader != null && !correlationIdHeader.isBlank()
                 ? CorrelationId.of(correlationIdHeader)

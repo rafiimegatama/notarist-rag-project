@@ -13,6 +13,7 @@ import com.notarist.core.api.response.ApiMeta;
 import com.notarist.core.api.response.ApiResponse;
 import com.notarist.core.domain.valueobject.CorrelationId;
 import com.notarist.core.domain.valueobject.SessionId;
+import com.notarist.core.security.VpdContextHolder;
 import com.notarist.core.util.NotaristConstants;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -89,9 +90,13 @@ public class AuthController {
             @RequestParam(required = false, defaultValue = "0") long remainingTtlSeconds,
             HttpServletRequest httpRequest) {
 
+        VpdContextHolder.VpdPrincipal principal = VpdContextHolder.get()
+                .orElseThrow(() -> new IllegalStateException("Unauthenticated request"));
+
         CorrelationId correlationId = extractCorrelationId(httpRequest);
         LogoutCommand command = new LogoutCommand(
                 new SessionId(sessionId),
+                principal.userId(),
                 jti,
                 remainingTtlSeconds,
                 correlationId

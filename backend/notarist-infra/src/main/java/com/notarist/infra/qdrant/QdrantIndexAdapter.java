@@ -1,5 +1,6 @@
 package com.notarist.infra.qdrant;
 
+import com.notarist.core.domain.policy.OcrConfidencePolicy;
 import com.notarist.core.domain.valueobject.DocumentId;
 import com.notarist.infra.resilience.DegradedModeRegistry;
 import com.notarist.infra.resilience.NotaristRetryPolicy;

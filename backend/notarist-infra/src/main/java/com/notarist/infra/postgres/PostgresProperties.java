@@ -14,7 +14,7 @@ public record PostgresProperties(
         String password,
         String driverClassName,
         int minimumIdle,
-        int maximumPoolSize,
+        int poolMax,
         long connectionTimeoutMs,
         long idleTimeoutMs,
         long maxLifetimeMs,
@@ -27,7 +27,7 @@ public record PostgresProperties(
         if (username == null || username.isBlank()) throw new IllegalStateException("notarist.database.postgres.username required");
         if (driverClassName == null || driverClassName.isBlank()) driverClassName = "org.postgresql.Driver";
         if (minimumIdle <= 0)          minimumIdle        = 2;
-        if (maximumPoolSize <= 0)      maximumPoolSize     = 10;
+        if (poolMax <= 0)              poolMax             = 10;
         if (connectionTimeoutMs <= 0)  connectionTimeoutMs = 5_000;
         if (idleTimeoutMs <= 0)        idleTimeoutMs       = 600_000;
         if (maxLifetimeMs <= 0)        maxLifetimeMs       = 1_800_000;

@@ -8,6 +8,7 @@ import com.notarist.core.domain.exception.DocumentNotFoundException;
 import com.notarist.core.domain.exception.NotaristException;
 import com.notarist.core.domain.exception.UnauthorizedAccessException;
 import com.notarist.core.domain.exception.ValidationException;
+import com.notarist.ingest.domain.exception.IngestionStageException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -65,6 +66,16 @@ public class GlobalExceptionHandler {
             .body(ApiResponse.error(
                 ApiMeta.of(getCorrelationId(request)),
                 ApiError.of("VALIDATION_FIELD_REQUIRED", "Validation failed", details)));
+    }
+
+    @ExceptionHandler(IngestionStageException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIngestionStage(
+            IngestionStageException ex, HttpServletRequest request) {
+        HttpStatus status = ex.isRetryable() ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.UNPROCESSABLE_ENTITY;
+        return ResponseEntity.status(status)
+            .body(ApiResponse.error(
+                ApiMeta.of(getCorrelationId(request)),
+                ApiError.of(ex.getErrorCode(), ex.getMessage())));
     }
 
     @ExceptionHandler(NotaristException.class)

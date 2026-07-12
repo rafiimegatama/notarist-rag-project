@@ -6,6 +6,7 @@ import com.notarist.auth.application.port.out.SessionTokenRepository;
 import com.notarist.auth.application.port.out.TokenDenyListPort;
 import com.notarist.auth.domain.model.Session;
 import com.notarist.core.api.audit.AuditEventPayload;
+import com.notarist.core.domain.exception.UnauthorizedAccessException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +33,11 @@ public class LogoutHandler implements InvalidateSessionUseCase {
     public void execute(LogoutCommand command) {
         Session session = sessionTokenRepository.findById(command.sessionId())
                 .orElse(null);
+
+        if (session != null && !session.getUserId().value().equals(command.callerUserId())) {
+            throw new UnauthorizedAccessException(
+                    "AUTH_SESSION_OWNERSHIP", "Session does not belong to the caller");
+        }
 
         sessionTokenRepository.invalidate(command.sessionId());
 

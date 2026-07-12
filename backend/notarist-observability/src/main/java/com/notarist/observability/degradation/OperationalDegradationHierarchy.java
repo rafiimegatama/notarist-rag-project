@@ -1,6 +1,6 @@
 package com.notarist.observability.degradation;
 
-import com.notarist.observability.circuit.CircuitBreakerRegistry;
+import com.notarist.infra.resilience.DegradedModeRegistry;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -22,7 +22,13 @@ import java.util.concurrent.atomic.AtomicReference;
  *   FULL              — all integrations healthy
  *
  * Callers (response strategy, audit, health endpoint) read getActiveLevel() rather than
- * checking each circuit breaker individually — single point of truth for degradation.
+ * checking each service individually — single point of truth for degradation.
+ *
+ * State is read from DegradedModeRegistry (notarist-infra), which the real adapters
+ * (QdrantIndexAdapter, MinIO, Ollama/runtime workers) already update via markDegraded()/
+ * markHealthy() on every call. This class no longer reads CircuitBreakerRegistry — that
+ * registry's recordFailure()/recordSuccess()/isCallAllowed() are never invoked by any adapter,
+ * so it always reported CLOSED/healthy regardless of real outages.
  */
 @Component
 public class OperationalDegradationHierarchy {
@@ -56,13 +62,13 @@ public class OperationalDegradationHierarchy {
             String           primaryCause
     ) {}
 
-    private final CircuitBreakerRegistry              circuitBreakers;
+    private final DegradedModeRegistry                degradedMode;
     private final AtomicReference<DegradationSnapshot> currentSnapshot;
     private final MeterRegistry                       meterRegistry;
 
-    public OperationalDegradationHierarchy(CircuitBreakerRegistry circuitBreakers,
+    public OperationalDegradationHierarchy(DegradedModeRegistry degradedMode,
                                             MeterRegistry meterRegistry) {
-        this.circuitBreakers  = circuitBreakers;
+        this.degradedMode     = degradedMode;
         this.meterRegistry    = meterRegistry;
         this.currentSnapshot  = new AtomicReference<>(
                 new DegradationSnapshot(DegradationLevel.FULL, Instant.now(), "startup"));
@@ -74,33 +80,35 @@ public class OperationalDegradationHierarchy {
     }
 
     /**
-     * Recomputes degradation level from current circuit breaker states.
-     * Call this after any circuit-breaker state change.
+     * Recomputes degradation level from the real, currently-tracked service degradation state
+     * (DegradedModeRegistry — populated by the actual Qdrant/MinIO/Ollama/OCR adapters).
+     * Call this after any adapter-reported degradation state change.
      */
     public DegradationLevel evaluate() {
-        var states = circuitBreakers.snapshotStates();
-
         DegradationLevel level;
         String cause;
 
-        if (isOpen(states, CircuitBreakerRegistry.Integration.POSTGRES)) {
+        if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.POSTGRES)) {
             level = DegradationLevel.CRITICAL;
-            cause = "PostgreSQL circuit OPEN";
-        } else if (isOpen(states, CircuitBreakerRegistry.Integration.MINIO)) {
+            cause = "PostgreSQL degraded";
+        } else if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.MINIO)) {
             level = DegradationLevel.EMERGENCY;
-            cause = "MinIO circuit OPEN";
-        } else if (isOpen(states, CircuitBreakerRegistry.Integration.OLLAMA)) {
+            cause = "MinIO degraded";
+        } else if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.OLLAMA)) {
             level = DegradationLevel.SEARCH_ONLY;
-            cause = "Ollama circuit OPEN";
-        } else if (isOpen(states, CircuitBreakerRegistry.Integration.QDRANT)) {
+            cause = "Ollama degraded";
+        } else if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.QDRANT)) {
             level = DegradationLevel.LIMITED_SEARCH;
-            cause = "Qdrant circuit OPEN";
-        } else if (isOpen(states, CircuitBreakerRegistry.Integration.OCR)) {
+            cause = "Qdrant degraded";
+        } else if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.OCR)) {
             level = DegradationLevel.DEGRADED;
-            cause = "OCR circuit OPEN";
+            cause = "OCR degraded";
+        } else if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.EMBEDDING)) {
+            level = DegradationLevel.DEGRADED;
+            cause = "Embedding degraded";
         } else {
             level = DegradationLevel.FULL;
-            cause = "all circuits CLOSED";
+            cause = "all services healthy";
         }
 
         DegradationSnapshot previous = currentSnapshot.get();
@@ -121,10 +129,5 @@ public class OperationalDegradationHierarchy {
 
     public DegradationSnapshot getSnapshot() {
         return currentSnapshot.get();
-    }
-
-    private boolean isOpen(java.util.Map<CircuitBreakerRegistry.Integration, CircuitBreakerRegistry.State> states,
-                            CircuitBreakerRegistry.Integration integration) {
-        return states.get(integration) == CircuitBreakerRegistry.State.OPEN;
     }
 }

@@ -53,6 +53,7 @@ public class BM25SearchRepositoryImpl implements KeywordSearchRepository {
                     ts_rank(ci.search_vector, plainto_tsquery('simple', ?)) AS bm25_score
                 FROM chunk_index ci
                 WHERE ci.tenant_id = ?::uuid
+                  AND ci.searchable = TRUE
                   AND ci.search_vector @@ plainto_tsquery('simple', ?)
                   AND CASE ci.classification_level
                         WHEN 'PUBLIC'                THEN 0

@@ -11,7 +11,9 @@ import {
   Modal,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { listDocuments, initiateUpload, uploadFileToSignedUrl, confirmUpload, computeFileSha256 } from '../api/documents';
+import { listDocuments, initiateUpload, uploadFileToSignedUrl, confirmUpload, computeFileSha256, getIngestionStatus } from '../api/documents';
+
+const TERMINAL_PIPELINE_STATUSES = new Set(['COMPLETED', 'FAILED', 'DLQ']);
 
 const DOC_TYPE_LABELS = {
   AKTA: 'Akta',
@@ -127,6 +129,27 @@ export default function DocumentsScreen({ navigation }) {
     setShowPicker(true);
   };
 
+  const pollIngestionStatus = useCallback(async (jobId) => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      try {
+        const status = await getIngestionStatus(jobId);
+        if (TERMINAL_PIPELINE_STATUSES.has(status.pipelineStatus)) {
+          if (status.pipelineStatus !== 'COMPLETED') {
+            Alert.alert(
+              'Pemrosesan Gagal',
+              `Dokumen gagal diproses pada tahap ${status.failureStage || 'tidak diketahui'}`
+            );
+          }
+          loadDocuments(true);
+          return;
+        }
+      } catch (_) {
+        return; // status endpoint unreachable — stop polling silently, list still refreshes on next manual pull
+      }
+    }
+  }, [loadDocuments]);
+
   const handleConfirmUpload = async () => {
     const file = pendingFile;
     if (!file) return;
@@ -147,6 +170,7 @@ export default function DocumentsScreen({ navigation }) {
 
       Alert.alert('Berhasil', 'Dokumen berhasil diunggah dan sedang diproses');
       loadDocuments(true);
+      pollIngestionStatus(jobId);
     } catch (err) {
       const msg = err.response?.data?.errorMessage || 'Upload gagal';
       Alert.alert('Upload Gagal', msg);

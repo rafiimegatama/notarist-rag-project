@@ -64,6 +64,12 @@ public class IngestionJobJpaEntity {
     @Column(name = "DEAD_LETTER_REASON", length = 1000)
     private String deadLetterReason;
 
+    @Column(name = "OCR_CONFIDENCE")
+    private Float ocrConfidence;
+
+    @Column(name = "OCR_OBJECT_KEY", length = 1000)
+    private String ocrObjectKey;
+
     @Lob
     @Column(name = "STAGE_HISTORY", nullable = false)
     private String stageHistoryJson;
@@ -85,7 +91,8 @@ public class IngestionJobJpaEntity {
             String originalFilename, String checksumSha256, String pipelineStatus,
             String overallStatus, String failureStage, int retryCount,
             String lastErrorCode, String lastErrorHash, Instant nextRetryAt,
-            String deadLetterReason, String stageHistoryJson,
+            String deadLetterReason, Float ocrConfidence, String ocrObjectKey,
+            String stageHistoryJson,
             Instant createdAt, Instant updatedAt, Instant completedAt) {
         this.ingestionId = ingestionId;
         this.jobId = jobId;
@@ -104,6 +111,8 @@ public class IngestionJobJpaEntity {
         this.lastErrorHash = lastErrorHash;
         this.nextRetryAt = nextRetryAt;
         this.deadLetterReason = deadLetterReason;
+        this.ocrConfidence = ocrConfidence;
+        this.ocrObjectKey = ocrObjectKey;
         this.stageHistoryJson = stageHistoryJson;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
@@ -127,6 +136,8 @@ public class IngestionJobJpaEntity {
     public String getLastErrorHash() { return lastErrorHash; }
     public Instant getNextRetryAt() { return nextRetryAt; }
     public String getDeadLetterReason() { return deadLetterReason; }
+    public Float getOcrConfidence() { return ocrConfidence; }
+    public String getOcrObjectKey() { return ocrObjectKey; }
     public String getStageHistoryJson() { return stageHistoryJson; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
@@ -140,6 +151,8 @@ public class IngestionJobJpaEntity {
     public void setLastErrorHash(String lastErrorHash) { this.lastErrorHash = lastErrorHash; }
     public void setNextRetryAt(Instant nextRetryAt) { this.nextRetryAt = nextRetryAt; }
     public void setDeadLetterReason(String deadLetterReason) { this.deadLetterReason = deadLetterReason; }
+    public void setOcrConfidence(Float ocrConfidence) { this.ocrConfidence = ocrConfidence; }
+    public void setOcrObjectKey(String ocrObjectKey) { this.ocrObjectKey = ocrObjectKey; }
     public void setStageHistoryJson(String stageHistoryJson) { this.stageHistoryJson = stageHistoryJson; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }

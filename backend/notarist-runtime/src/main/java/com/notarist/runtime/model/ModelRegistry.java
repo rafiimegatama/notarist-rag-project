@@ -2,15 +2,11 @@ package com.notarist.runtime.model;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * Central model registry. Single source of truth for all AI model configurations.
@@ -18,48 +14,40 @@ import java.util.stream.Collectors;
  * No model config scattered across adapters.
  * All runtime adapters inject ModelRegistry to resolve endpoints, dimensions, and context limits.
  *
- * Bound from spring.notarist.models.* in application.yml.
- * Example:
- *   spring:
- *     notarist:
- *       models:
- *         - model-name: llama3.2:3b-instruct-q8_0
- *           version: "3.2.0"
- *           provider: OLLAMA
- *           endpoint-url: http://localhost:11434
- *           max-context-window: 131072
- *           max-output-tokens: 2048
+ * Endpoint URLs are injected from the notarist.sidecar.* configuration block in
+ * application.yaml (env-overridable: OLLAMA_BASE_URL, OCR_BASE_URL, NER_BASE_URL,
+ * RERANKER_BASE_URL, EMBEDDING_BASE_URL) so the registry always matches the
+ * deployed sidecar topology instead of compile-time constants.
  */
 @Component
 public class ModelRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(ModelRegistry.class);
 
-    /** Built-in defaults for Phase 5B — overridable via application.yml */
-    private static final ModelDefinition DEFAULT_LLM = new ModelDefinition(
-            "llama3.2:3b-instruct-q8_0", "3.2.0", ModelProvider.OLLAMA,
-            "http://localhost:11434", 0, "llama", 131072, 2048, "unverified");
-
-    private static final ModelDefinition DEFAULT_EMBEDDING = new ModelDefinition(
-            "bge-m3", "1.0.0", ModelProvider.BGE_M3,
-            "http://localhost:8100", 1024, "bge-m3-tokenizer", 8192, 0, "unverified");
-
-    private static final ModelDefinition DEFAULT_RERANKER = new ModelDefinition(
-            "bge-reranker-v2-m3", "2.0.0", ModelProvider.CROSS_ENCODER,
-            "http://localhost:8101", 0, "bge-reranker-tokenizer", 512, 0, "unverified");
-
-    private static final ModelDefinition DEFAULT_OCR = new ModelDefinition(
-            "paddleocr-v4", "4.0.0", ModelProvider.PADDLEOCR,
-            "http://localhost:9080", 0, "none", 0, 0, "unverified");
-
     private final Map<ModelProvider, ModelDefinition> registry;
 
-    public ModelRegistry() {
+    public ModelRegistry(
+            @Value("${notarist.sidecar.ollama.base-url:http://localhost:11434}") String ollamaUrl,
+            @Value("${notarist.sidecar.embedding.base-url:http://localhost:8084}") String embeddingUrl,
+            @Value("${notarist.sidecar.reranker.base-url:http://localhost:8083}") String rerankerUrl,
+            @Value("${notarist.sidecar.ocr.base-url:http://localhost:8081}") String ocrUrl,
+            @Value("${notarist.sidecar.ner.base-url:http://localhost:8082}") String nerUrl) {
         registry = Map.of(
-                ModelProvider.OLLAMA,       DEFAULT_LLM,
-                ModelProvider.BGE_M3,       DEFAULT_EMBEDDING,
-                ModelProvider.CROSS_ENCODER, DEFAULT_RERANKER,
-                ModelProvider.PADDLEOCR,    DEFAULT_OCR);
+                ModelProvider.OLLAMA, new ModelDefinition(
+                        "llama3.2:3b-instruct-q8_0", "3.2.0", ModelProvider.OLLAMA,
+                        ollamaUrl, 0, "llama", 131072, 2048, "unverified"),
+                ModelProvider.BGE_M3, new ModelDefinition(
+                        "bge-m3", "1.0.0", ModelProvider.BGE_M3,
+                        embeddingUrl, 1024, "bge-m3-tokenizer", 8192, 0, "unverified"),
+                ModelProvider.CROSS_ENCODER, new ModelDefinition(
+                        "bge-reranker-v2-m3", "2.0.0", ModelProvider.CROSS_ENCODER,
+                        rerankerUrl, 0, "bge-reranker-tokenizer", 512, 0, "unverified"),
+                ModelProvider.PADDLEOCR, new ModelDefinition(
+                        "paddleocr-v4", "4.0.0", ModelProvider.PADDLEOCR,
+                        ocrUrl, 0, "none", 0, 0, "unverified"),
+                ModelProvider.INDOBERT, new ModelDefinition(
+                        "indobert-base", "1.0.0", ModelProvider.INDOBERT,
+                        nerUrl, 0, "indobert-tokenizer", 512, 0, "unverified"));
         log.info("ModelRegistry initialized with {} models: {}",
                 registry.size(), registry.keySet());
     }
@@ -78,6 +66,7 @@ public class ModelRegistry {
     public ModelDefinition getEmbedding(){ return get(ModelProvider.BGE_M3); }
     public ModelDefinition getReranker() { return get(ModelProvider.CROSS_ENCODER); }
     public ModelDefinition getOcr()      { return get(ModelProvider.PADDLEOCR); }
+    public ModelDefinition getNer()      { return get(ModelProvider.INDOBERT); }
 
     public int embeddingDimension() {
         return get(ModelProvider.BGE_M3).embeddingDimension();

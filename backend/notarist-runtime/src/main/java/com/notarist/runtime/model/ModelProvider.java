@@ -13,5 +13,8 @@ public enum ModelProvider {
     PADDLEOCR,
 
     /** Cross-encoder reranker (e.g., bge-reranker-v2-m3) via local HTTP endpoint */
-    CROSS_ENCODER
+    CROSS_ENCODER,
+
+    /** IndoBERT — Indonesian NER + PII redaction served via local HTTP endpoint */
+    INDOBERT
 }

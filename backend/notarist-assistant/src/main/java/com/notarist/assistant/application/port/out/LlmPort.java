@@ -8,8 +8,8 @@ import java.util.function.Consumer;
 
 /**
  * Output port for LLM inference.
- * Implemented by OllamaAdapter (stub in Phase 4).
- * Real Ollama HTTP integration deferred to Phase 5.
+ * Implemented by OllamaRuntimeAdapter in notarist-runtime
+ * (real Ollama HTTP + NDJSON streaming).
  */
 public interface LlmPort {
 

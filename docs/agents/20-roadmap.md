@@ -8,6 +8,7 @@
 | — | 2026-05-24 | STEP 2–7.5 architecture fully decided and frozen; STEP 8A backend skeleton (127 files) generated; STEP 8B Phase 1 (auth + document) completed |
 | — | 2026-07-03 | Deployable project structure assembled from generated code; a long sequence of pre-deployment defect fixes followed (bean conflicts, orphaned ports, FK constraints, `@Qualifier` disambiguation, config-prefix mismatches, schema/code alignment — see `git log`) |
 | — | 2026-07-12 | Zero-defect build achieved across all 12 backend modules; React Native (Expo) frontend scaffold added; this doc set (`docs/agents/`) written |
+| — | 2026-07-13 | Production QA audit (21 findings, `production_qa_audit_report.md`); 12 now fixed across 5 remediation rounds. Round 5 made the ingestion pipeline carry real data end to end and fixed the F11/F20 stall that had left it inert; repository's first automated tests added |
 | — | 2026-07-12 | Commit `5d686f8`: cross-tenant/security/build defect fixes (JWT filter chain wiring, `SearchController` cross-tenant header trust, `UserJpaEntity` JPA mapping), OCR policy relocated to `notarist-core`, real query-time embedding wiring, real `QdrantIndexAdapter`, plus two compile-breaking call sites (see below) fixed before commit |
 
 ## Reconciling memory vs. actual state (important)
@@ -58,32 +59,53 @@ Found broken, not caught by the audit's own verification, and fixed before commi
 Both are now committed with all 12 backend modules verified to compile via a real `javac`
 pass, not just static read-through.
 
-## Still-open gap: OCR-confidence gating never actually reaches Qdrant
+## Closed: the ingestion pipeline now carries real data end to end (2026-07-13)
 
-The audit's checklist listed exactly one open item — "wire OCR confidence gating in
-`QdrantIndexAdapter`" — but the real gap is larger than a missing delegate call:
+The gap previously recorded here — OCR-confidence gating never reaching Qdrant, because every
+stage fabricated its own stub input — is closed, together with audit findings F18, F11 and F20:
 
-- `QdrantIndexAdapter.toQdrantPoint()` hardcodes `is_searchable = true` despite its own class
-  Javadoc claiming it's "set from `OcrReviewStatus` on the chunk payload." `OcrConfidencePolicy`
-  is imported and never used.
-- It can't be wired yet anyway: `VectorIndexPort.ChunkPayload` (the record `toQdrantPoint`
-  actually receives) carries no confidence/review-status field at all.
-- `ChunkMetadata` *does* carry `ocrConfidence`/`reviewStatus`/`searchable` now, but nothing
-  reads it — `ChunkWorker` builds it and discards it (no repository persists `ChunkMetadata`),
-  and `IndexingWorker` still fabricates a single stub zero-vector chunk per job
-  (`buildIndexableChunks()`) from `IngestionJob` fields directly, ignoring per-chunk data
-  entirely. `EmbeddingWorker` is the same shape — stub input, never reads real chunk text.
+- Real per-chunk data now flows `ChunkWorker → EmbeddingWorker → IndexingWorker → Qdrant`:
+  a `DocumentChunker` domain service, a `ChunkMetadata` persistence port + Postgres repository
+  (Flyway `V6__chunk_index_ingest_columns.sql`), real NER/embedding runtime adapters, and Oracle
+  `V003` adding the `IngestionJob.ocrConfidence`/`ocrObjectKey` columns the JPA entity was
+  missing. `IndexingWorker` upserts real embeddings instead of a stub zero-vector, and
+  `VectorIndexPort.ChunkPayload` carries `searchable`, so OCR gating actually reaches the index.
 
-Closing this properly means: a new Oracle migration + JPA columns for `IngestionJob.ocrConfidence`/
-`ocrObjectKey`, a `ChunkMetadata` persistence port/repository, and rewiring
-`ChunkWorker → EmbeddingWorker → IndexingWorker` to pass real per-chunk data through the
-pipeline instead of each stage independently fabricating stub input. This was scoped as a
-separate, larger follow-up rather than folded into the compile fix above.
+- **The keystone bug (F11/F20).** All of the above was inert: the pipeline stalled one step
+  before Qdrant and nothing was ever indexed. `PipelineCoordinator` transitions a job to
+  `completedStageFor(stage)` and then asks `nextPendingStage(newStatus)` what to enqueue — but
+  there is no `EMBED_COMPLETED` status (the enum *and* the Oracle check constraint on
+  `INGESTION_JOB.PIPELINE_STATUS` collapse it into `INDEX_PENDING`), so after embedding a job's
+  status **is already** the next pending stage. `nextPendingStage` matched on `EMBED_PENDING`
+  instead — a status that is never passed to it — so it returned empty and no INDEX queue row
+  was ever created. The dead branch (F20) *was* the stall (F11). Fixed by routing
+  `INDEX_PENDING → INDEX_PENDING`, the one status that maps to itself; the asymmetry is now
+  documented on the method rather than left as a trap.
+
+Verified by a full `./gradlew build --rerun-tasks` (12 modules) and by the repository's first
+automated tests — see below.
+
+## The test suite has started (`PipelineStateMachineTest`)
+
+`backend/build.gradle.kts` now declares JUnit 5 for all subprojects (the `useJUnitPlatform()`
+config already existed but no test dependency did), and `notarist-ingest` has 4 tests over
+`PipelineStateMachine`. The headline test walks a job the way `PipelineCoordinator` drives it
+and asserts it reaches `COMPLETED` — it was confirmed **red against the old mapping** (2
+failures) and green after the fix, so it is a real regression guard, not a green rubber stamp.
+
+This is the beachhead for next-step 3 below: the domain layer is pure and Spring-free, so it is
+the cheapest place to keep adding tests.
 
 ## Known gaps / open questions
 
-- **No automated test suite exists yet** (see [[18-testing-standard]]) — this is the single
-  largest gap between current state and the target standard.
+- **Test coverage is one class deep** (see [[18-testing-standard]]) — still the single largest
+  gap between current state and the target standard. `PipelineStateMachine` is covered; every
+  other domain policy (`DocumentStatusMachine`, `RetryPolicy`, `OcrConfidencePolicy`) and every
+  worker, adapter and handler has no test.
+- **The ingestion pipeline has never been run against live infrastructure.** Its data flow is
+  now real and unit-tested at the state-machine level, but no Oracle/Postgres/Qdrant/MinIO was
+  available in any session so far — no document has actually been ingested end to end. The
+  audit's runtime findings stop at "context boots, fails only on external DB connect."
 - **Frontend TypeScript vs. JavaScript is unresolved** — STEP 5 specified TypeScript; the
   actual Expo scaffold added 2026-07-12 is plain `.js` (see [[07-frontend-agent]]). Needs an
   explicit decision, not a silent default either way.
@@ -100,16 +122,19 @@ separate, larger follow-up rather than folded into the compile fix above.
 
 ## Suggested next steps, in priority order
 
-1. Close the OCR-confidence-gating gap above: migration + JPA columns for `IngestionJob`,
-   a `ChunkMetadata` persistence port, and real data flow through
-   `ChunkWorker → EmbeddingWorker → IndexingWorker → QdrantIndexAdapter`. This is the actual
-   remaining correctness gap in the ingestion pipeline, not a one-line delegate call.
-2. Resolve the frontend TypeScript decision before more screens are added.
-3. Stand up the test suite per [[18-testing-standard]], starting with the domain layer
-   (cheapest, highest-value: `PipelineStateMachine`, `DocumentStatusMachine`, `RetryPolicy`,
-   `OcrConfidencePolicy`) — a unit test on `ChunkWorker`'s constructor call would have caught
-   the compile break above immediately, before it ever reached a commit review.
-4. Wire ML sidecar health checks into `notarist-observability` if they aren't already there.
-5. Decide and record whether the KPI/dashboard capability is revived, redefined around
+1. **Run the pipeline against live infrastructure** — `docker compose up` the stack and ingest
+   one real document end to end. This is now the highest-value next action: the data flow is
+   real but has never executed, and the remaining open audit findings (F4/F7 VPD policies,
+   F9 audit-trail persistence, F12 Oracle pool) are all things only a live run will expose.
+2. Work the remaining open audit findings in `production_qa_audit_report.md` — 8 left, with
+   F4 (CRITICAL: VPD policy function `TENANT_ISOLATION_POLICY` referenced but never created),
+   F7 and F9 the highest-severity.
+3. Keep extending the domain test suite per [[18-testing-standard]] — `DocumentStatusMachine`,
+   `RetryPolicy`, `OcrConfidencePolicy` next. The `PipelineStateMachine` tests already paid for
+   themselves by pinning F11; note that finding sat undetected through a full audit *and* a
+   remediation round precisely because nothing executed the pipeline.
+4. Resolve the frontend TypeScript decision before more screens are added.
+5. Wire ML sidecar health checks into `notarist-observability` if they aren't already there.
+6. Decide and record whether the KPI/dashboard capability is revived, redefined around
    `DOKUMEN_LEGAL`, or formally dropped from `/CLAUDE.md`'s primary goal list.
-6. Push `main` to `origin/main` when ready — it's currently several commits ahead, unpushed.
+7. Push `main` to `origin/main` when ready — it's currently several commits ahead, unpushed.

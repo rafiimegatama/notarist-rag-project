@@ -146,6 +146,21 @@ public class IngestionJob {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Records the OCR stage output so downstream stages (NER, CHUNK) can consume
+     * the real extracted text between scheduler executions. ocrObjectKey is the
+     * MinIO object holding the extracted text; confidence drives the
+     * OcrConfidencePolicy searchability decision at chunking time.
+     */
+    public void recordOcrResult(float confidence, String ocrObjectKey) {
+        if (ocrObjectKey == null || ocrObjectKey.isBlank()) {
+            throw new IllegalArgumentException("ocrObjectKey required");
+        }
+        this.ocrConfidence = confidence;
+        this.ocrObjectKey = ocrObjectKey;
+        this.updatedAt = Instant.now();
+    }
+
     public boolean isEligibleForRetry(int maxRetries) {
         return retryCount < maxRetries && pipelineStatus == PipelineStatus.FAILED;
     }
@@ -188,6 +203,8 @@ public class IngestionJob {
     public String getLastErrorHash() { return lastErrorHash; }
     public Instant getNextRetryAt() { return nextRetryAt; }
     public String getDeadLetterReason() { return deadLetterReason; }
+    public Float getOcrConfidence() { return ocrConfidence; }
+    public String getOcrObjectKey() { return ocrObjectKey; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getCompletedAt() { return completedAt; }

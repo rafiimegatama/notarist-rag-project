@@ -9,8 +9,7 @@ import java.util.UUID;
 
 /**
  * Output port for Qdrant vector index operations.
- * Implemented by VectorIndexAdapter (no-op stub in Phase 2).
- * Real Qdrant client upsert deferred to Phase 2C when real vectors are available.
+ * Implemented by QdrantIndexAdapter in notarist-infra.
  */
 public interface VectorIndexPort {
 
@@ -30,8 +29,10 @@ public interface VectorIndexPort {
             JenisDokumen documentType,
             ClassificationLevel classificationLevel,
             String sectionTitle,
+            String pasalRef,
             int chunkIndex,
             String text,
-            String sourceObjectKey
+            String sourceObjectKey,
+            boolean searchable
     ) {}
 }

@@ -44,7 +44,10 @@ public class IngestModuleConfig {
         config.setIdleTimeout(600_000);
         config.setMaxLifetime(1_800_000);
         config.setPoolName("IngestPostgresPool");
-        config.setAutoCommit(false);
+        // autoCommit must stay true (Hikari default): no PlatformTransactionManager
+        // exists for this datasource, so JdbcTemplate statements run on raw pooled
+        // connections — with autocommit off, Hikari rolls the work back when the
+        // connection returns to the pool and every queue/chunk write is silently lost.
         return new HikariDataSource(config);
     }
 

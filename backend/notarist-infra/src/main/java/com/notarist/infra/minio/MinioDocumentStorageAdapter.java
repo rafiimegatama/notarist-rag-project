@@ -135,11 +135,8 @@ public class MinioDocumentStorageAdapter implements DocumentStoragePort {
         });
     }
 
-    /**
-     * Generic download — used by OCR/NER workers to fetch document content from MinIO.
-     * Not part of DocumentStoragePort but needed by pipeline workers.
-     */
-    public InputStream download(String objectKey, String correlationId) {
+    @Override
+    public InputStream openObject(String objectKey) {
         long startMs = System.currentTimeMillis();
         try {
             GetObjectResponse response = minioClient.getObject(
@@ -153,8 +150,8 @@ public class MinioDocumentStorageAdapter implements DocumentStoragePort {
         } catch (Exception e) {
             metrics.recordOperationFailed("download");
             degradedMode.markDegraded(DegradedModeRegistry.ExternalService.MINIO, e.getMessage());
-            log.error("MinIO download failed objectKey={} correlationId={}: {}", objectKey, correlationId, e.getMessage(), e);
-            throw new MinioIntegrationException("download failed for: " + objectKey, e);
+            log.error("MinIO openObject failed objectKey={}: {}", objectKey, e.getMessage(), e);
+            throw new MinioIntegrationException("openObject failed for: " + objectKey, e);
         }
     }
 

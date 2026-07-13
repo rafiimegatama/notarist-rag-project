@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <!-- ============================================================
+         NOTARIST RAG Platform — Oracle 19C VPD trusted context package
+         Liquibase V004 — implements NOTARIST.SET_NOTARIST_CTX
+
+         The application context NOTARIST_CTX is declared in V001 as
+             CREATE OR REPLACE CONTEXT NOTARIST_CTX USING NOTARIST.SET_NOTARIST_CTX ...
+         A context declared "USING <package>" can ONLY be written by that
+         trusted package. The package was never created, so the application's
+         direct DBMS_SESSION.SET_CONTEXT calls could never populate the context
+         (ORA-01031). This changelog creates that trusted package with a setter
+         and a clearer, which the VpdContextApplier now invokes.
+         ============================================================ -->
+
+    <changeSet id="V004-01-vpd-package-spec" author="notarist-security" runOnChange="true">
+        <comment>Trusted package spec that owns the NOTARIST_CTX application context</comment>
+        <sql splitStatements="false" stripComments="false">
+            CREATE OR REPLACE PACKAGE NOTARIST.SET_NOTARIST_CTX AS
+                -- Sets the per-session identity read by VPD policy functions via
+                -- SYS_CONTEXT('NOTARIST_CTX', 'USER_ID'|'TENANT_ID'|'USER_ROLE').
+                PROCEDURE set_identity(p_user_id  IN VARCHAR2,
+                                       p_tenant_id IN VARCHAR2,
+                                       p_role      IN VARCHAR2);
+
+                -- Clears the identity so it never leaks into the next borrower of a pooled connection.
+                PROCEDURE clear_identity;
+            END SET_NOTARIST_CTX;
+        </sql>
+        <rollback>
+            <sql splitStatements="false">DROP PACKAGE NOTARIST.SET_NOTARIST_CTX</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="V004-02-vpd-package-body" author="notarist-security" runOnChange="true">
+        <comment>Trusted package body — the only code permitted to write NOTARIST_CTX</comment>
+        <sql splitStatements="false" stripComments="false">
+            CREATE OR REPLACE PACKAGE BODY NOTARIST.SET_NOTARIST_CTX AS
+                PROCEDURE set_identity(p_user_id  IN VARCHAR2,
+                                       p_tenant_id IN VARCHAR2,
+                                       p_role      IN VARCHAR2) IS
+                BEGIN
+                    DBMS_SESSION.SET_CONTEXT('NOTARIST_CTX', 'USER_ID',   p_user_id);
+                    DBMS_SESSION.SET_CONTEXT('NOTARIST_CTX', 'TENANT_ID', p_tenant_id);
+                    DBMS_SESSION.SET_CONTEXT('NOTARIST_CTX', 'USER_ROLE', p_role);
+                END set_identity;
+
+                PROCEDURE clear_identity IS
+                BEGIN
+                    DBMS_SESSION.CLEAR_CONTEXT('NOTARIST_CTX');
+                END clear_identity;
+            END SET_NOTARIST_CTX;
+        </sql>
+        <rollback/>
+    </changeSet>
+
+    <changeSet id="V004-03-grant-execute" author="notarist-security" runOnChange="true">
+        <comment>Allow the application user to invoke the trusted context package</comment>
+        <sql splitStatements="false">
+            BEGIN
+                EXECUTE IMMEDIATE 'GRANT EXECUTE ON NOTARIST.SET_NOTARIST_CTX TO NOTARIST_APP';
+            EXCEPTION
+                WHEN OTHERS THEN NULL; -- app user may equal schema owner, or be provisioned separately
+            END;
+        </sql>
+        <rollback/>
+    </changeSet>
+
+</databaseChangeLog>

@@ -36,14 +36,21 @@ public final class PipelineStateMachine {
         };
     }
 
-    /** Returns the next PENDING stage to enqueue after a COMPLETED stage. */
-    public static Optional<PipelineStatus> nextPendingStage(PipelineStatus completedStage) {
-        return switch (completedStage) {
+    /**
+     * Returns the PENDING stage to enqueue once a job has transitioned to {@code newStatus}.
+     *
+     * <p>There is no EMBED_COMPLETED status — the enum (and the Oracle check constraint on
+     * INGESTION_JOB.PIPELINE_STATUS) collapses it into INDEX_PENDING, so a job that finished
+     * embedding already carries the next pending stage as its own status. That case must still
+     * enqueue INDEX work; it is the one status that maps to itself.
+     */
+    public static Optional<PipelineStatus> nextPendingStage(PipelineStatus newStatus) {
+        return switch (newStatus) {
             case UPLOADED       -> Optional.of(PipelineStatus.OCR_PENDING);
             case OCR_COMPLETED  -> Optional.of(PipelineStatus.NER_PENDING);
             case NER_COMPLETED  -> Optional.of(PipelineStatus.CHUNK_PENDING);
             case CHUNK_COMPLETED -> Optional.of(PipelineStatus.EMBED_PENDING);
-            case EMBED_PENDING  -> Optional.of(PipelineStatus.INDEX_PENDING);
+            case INDEX_PENDING  -> Optional.of(PipelineStatus.INDEX_PENDING);
             default             -> Optional.empty();
         };
     }

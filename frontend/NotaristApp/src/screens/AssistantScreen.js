@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,15 +11,31 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
-import { askAssistant } from '../api/assistant';
+import { askAssistant, getConversationHistory } from '../api/assistant';
 
-let sessionId = null;
-function getSessionId() {
-  if (!sessionId) {
-    sessionId = Crypto.randomUUID();
+const SESSION_STORE_KEY = 'assistant_session_id';
+
+// Session id must be persisted, not regenerated per mount — a fresh id every
+// time means getConversationHistory() can never find a matching prior session.
+async function getOrCreateSessionId() {
+  let id = await SecureStore.getItemAsync(SESSION_STORE_KEY);
+  if (!id) {
+    id = Crypto.randomUUID();
+    await SecureStore.setItemAsync(SESSION_STORE_KEY, id);
   }
-  return sessionId;
+  return id;
+}
+
+function turnsToMessages(turns) {
+  const sorted = [...turns].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const messages = [];
+  for (const turn of sorted) {
+    messages.push({ id: `${turn.turnId}-q`, role: 'user', content: turn.userQuery });
+    messages.push({ id: `${turn.turnId}-a`, role: 'assistant', content: turn.assistantAnswer });
+  }
+  return messages;
 }
 
 function MessageBubble({ message }) {
@@ -59,11 +75,27 @@ export default function AssistantScreen() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const sessionIdRef = useRef(null);
   const flatListRef = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      const id = await getOrCreateSessionId();
+      sessionIdRef.current = id;
+      try {
+        const turns = await getConversationHistory(id);
+        if (turns && turns.length > 0) {
+          setMessages(prev => [...turnsToMessages(turns), ...prev]);
+        }
+      } catch (_) {
+        // no prior history (or backend unreachable) — keep just the welcome message
+      }
+    })();
+  }, []);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || !sessionIdRef.current) return;
 
     setInput('');
     const userMsg = { id: Date.now().toString(), role: 'user', content: text };
@@ -71,7 +103,7 @@ export default function AssistantScreen() {
 
     setLoading(true);
     try {
-      const response = await askAssistant(text, getSessionId());
+      const response = await askAssistant(text, sessionIdRef.current);
       const aiMsg = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',

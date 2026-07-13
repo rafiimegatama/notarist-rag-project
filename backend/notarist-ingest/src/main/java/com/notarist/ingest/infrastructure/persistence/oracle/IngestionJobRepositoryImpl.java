@@ -12,11 +12,20 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.*;
 
+/**
+ * VPD identity is applied at the start of each method; @Transactional guarantees the
+ * SET_NOTARIST_CTX call and the subsequent JPA query share one Oracle connection, and
+ * that VpdContextApplier's completion hook clears the identity before the connection is released.
+ * When invoked from an already-@Transactional caller (e.g. PipelineCoordinator) these join that
+ * transaction rather than starting a new one, so no nested-transaction behaviour is introduced.
+ */
 @Repository
+@Transactional
 public class IngestionJobRepositoryImpl implements IngestJobRepository {
 
     private static final ObjectMapper JSON = new ObjectMapper()
@@ -98,6 +107,8 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
                 job.getLastErrorHash(),
                 job.getNextRetryAt(),
                 job.getDeadLetterReason(),
+                job.getOcrConfidence(),
+                job.getOcrObjectKey(),
                 serializeHistory(job.getStageHistory()),
                 job.getCreatedAt(),
                 job.getUpdatedAt(),
@@ -113,6 +124,8 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
         entity.setLastErrorHash(job.getLastErrorHash());
         entity.setNextRetryAt(job.getNextRetryAt());
         entity.setDeadLetterReason(job.getDeadLetterReason());
+        entity.setOcrConfidence(job.getOcrConfidence());
+        entity.setOcrObjectKey(job.getOcrObjectKey());
         entity.setStageHistoryJson(serializeHistory(job.getStageHistory()));
         entity.setUpdatedAt(job.getUpdatedAt());
         entity.setCompletedAt(job.getCompletedAt());
@@ -139,8 +152,8 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
                 entity.getLastErrorHash(),
                 entity.getNextRetryAt(),
                 entity.getDeadLetterReason(),
-                null, // ocrConfidence — no IngestionJobJpaEntity column yet; not persisted
-                null, // ocrObjectKey — no IngestionJobJpaEntity column yet; not persisted
+                entity.getOcrConfidence(),
+                entity.getOcrObjectKey(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt(),
                 entity.getCompletedAt());

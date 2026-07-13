@@ -8,11 +8,18 @@ import com.notarist.core.domain.valueobject.PersonId;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 import java.util.UUID;
 
+/**
+ * VPD identity is applied at the start of each method; @Transactional guarantees the
+ * SET_NOTARIST_CTX call and the subsequent JPA query share one Oracle connection, and
+ * that VpdContextApplier's completion hook clears the identity before the connection is released.
+ */
 @Repository
+@Transactional
 public class UserRepositoryImpl implements UserRepository {
 
     private final UserJpaRepository jpaRepository;

@@ -36,6 +36,9 @@ subprojects {
     dependencies {
         "implementation"(platform("org.springframework.boot:spring-boot-dependencies:3.2.5"))
         "annotationProcessor"(platform("org.springframework.boot:spring-boot-dependencies:3.2.5"))
+        "testImplementation"(platform("org.springframework.boot:spring-boot-dependencies:3.2.5"))
+        "testImplementation"("org.junit.jupiter:junit-jupiter")
+        "testRuntimeOnly"("org.junit.platform:junit-platform-launcher")
     }
 
     tasks.withType<JavaCompile> {

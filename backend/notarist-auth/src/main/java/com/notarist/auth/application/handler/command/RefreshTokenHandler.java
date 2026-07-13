@@ -63,7 +63,15 @@ public class RefreshTokenHandler implements RefreshTokenUseCase {
             throw new UnauthorizedAccessException("AUTH_ACCOUNT_DISABLED", "Account is disabled");
         }
 
-        sessionTokenRepository.invalidate(existing.getSessionId());
+        // Atomically consume the presented refresh token before issuing new credentials.
+        // This is the transaction boundary for rotation: if another request already rotated
+        // this token (concurrent refresh or replay), the compare-and-set affects 0 rows and
+        // we reject here — preventing a token-reuse double-issue race.
+        if (!sessionTokenRepository.invalidateIfActive(existing.getSessionId())) {
+            throw new UnauthorizedAccessException(
+                    "AUTH_REFRESH_TOKEN_REUSED",
+                    "Refresh token already used or rotated concurrently");
+        }
 
         String newAccessToken = jwtService.issueAccessToken(user, command.correlationId());
         String newOpaqueToken = RefreshTokenFactory.generateOpaqueToken();

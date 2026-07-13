@@ -25,6 +25,7 @@ export default function HomeScreen({ navigation }) {
   const [stats, setStats] = useState({ total: 0, processing: 0, ready: 0 });
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [statsError, setStatsError] = useState(false);
 
   const loadStats = async () => {
     try {
@@ -35,8 +36,11 @@ export default function HomeScreen({ navigation }) {
         processing: 0,
         ready: total,
       });
+      setStatsError(false);
     } catch (_) {
-      // backend may not be running — show zeros
+      // Don't silently show zeros for a real failure — that's indistinguishable
+      // from "no documents yet" and misleads the user about backend health.
+      setStatsError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -68,6 +72,8 @@ export default function HomeScreen({ navigation }) {
       <Text style={styles.sectionTitle}>Ringkasan Dokumen</Text>
       {loading ? (
         <ActivityIndicator color="#3B82F6" style={{ marginTop: 24 }} />
+      ) : statsError ? (
+        <Text style={styles.statsErrorText}>Gagal memuat ringkasan. Tarik untuk memuat ulang.</Text>
       ) : (
         <View style={styles.statsRow}>
           <StatCard label="Total Dokumen" value={stats.total} color="#3B82F6" />
@@ -80,7 +86,7 @@ export default function HomeScreen({ navigation }) {
       <View style={styles.actionsGrid}>
         <TouchableOpacity
           style={styles.actionCard}
-          onPress={() => navigation.navigate('Assistant')}
+          onPress={() => navigation.navigate('Asisten')}
         >
           <Text style={styles.actionIcon}>🤖</Text>
           <Text style={styles.actionTitle}>Tanya AI</Text>
@@ -89,7 +95,7 @@ export default function HomeScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.actionCard}
-          onPress={() => navigation.navigate('Documents')}
+          onPress={() => navigation.navigate('Dokumen')}
         >
           <Text style={styles.actionIcon}>📄</Text>
           <Text style={styles.actionTitle}>Dokumen</Text>
@@ -143,6 +149,12 @@ const styles = StyleSheet.create({
   logoutText: {
     color: '#94A3B8',
     fontSize: 13,
+  },
+  statsErrorText: {
+    color: '#EF4444',
+    fontSize: 13,
+    marginHorizontal: 20,
+    marginTop: 12,
   },
   sectionTitle: {
     color: '#94A3B8',

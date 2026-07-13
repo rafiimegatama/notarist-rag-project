@@ -123,27 +123,32 @@ public class PipelineCoordinator {
             IngestQueueRepository.QueueRecord queueRecord,
             IngestionStageException ex) {
 
-        int attemptCount = queueRecord.attemptCount() + 1;
-        log.warn("Stage {} failed for ingestionId={} attempt={} errorCode={} retryable={}",
-                queueRecord.targetStage(), queueRecord.ingestionId(),
-                attemptCount, ex.getErrorCode(), ex.isRetryable(), ex);
-
         job.recordStageFailure(queueRecord.targetStage(), ex.getErrorCode(),
                 System.currentTimeMillis());
 
         metrics.recordStageFailure(queueRecord.targetStage());
 
+        // Single source of truth for retry counting is the job aggregate's retryCount.
+        // (Previously the decision used the queue row's attempt_count, which diverged from
+        // job.retryCount because RetryPolicyService re-enqueues with a reset attempt_count — F15.)
         boolean canRetry = ex.isRetryable()
-                && RetryPolicy.shouldRetry(attemptCount, maxRetries);
+                && RetryPolicy.shouldRetry(job.getRetryCount(), maxRetries);
+
+        log.warn("Stage {} failed for ingestionId={} retryCount={} errorCode={} retryable={}",
+                queueRecord.targetStage(), queueRecord.ingestionId(),
+                job.getRetryCount(), ex.getErrorCode(), ex.isRetryable(), ex);
 
         if (canRetry) {
-            Instant nextRetryAt = RetryPolicy.computeNextRetryAt(attemptCount);
-            job.scheduleRetry(nextRetryAt);
+            Instant nextRetryAt = RetryPolicy.computeNextRetryAt(job.getRetryCount() + 1);
+            job.scheduleRetry(nextRetryAt);          // retryCount -> retryCount + 1
             jobRepository.save(job);
+            // Mark the claimed row terminally FAILED and mirror the authoritative counter.
+            // RetryPolicyService alone re-enqueues (transitioning FAILED -> retry stage), so the
+            // retry is driven once, by one path, counted once.
             queueRepository.markFailed(queueRecord.queueJobId(), ex.getErrorCode(),
-                    attemptCount, nextRetryAt);
+                    job.getRetryCount(), nextRetryAt);
             log.info("Scheduled retry {} for ingestionId={} at {}",
-                    attemptCount, queueRecord.ingestionId(), nextRetryAt);
+                    job.getRetryCount(), queueRecord.ingestionId(), nextRetryAt);
         } else {
             job.moveToDlq(ex.getErrorCode() + ": " + ex.getMessage());
             jobRepository.save(job);

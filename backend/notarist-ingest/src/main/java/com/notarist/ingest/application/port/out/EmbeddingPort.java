@@ -4,8 +4,8 @@ import java.util.List;
 
 /**
  * Output port for dense vector embedding generation.
- * Implemented by EmbeddingAdapter (bge-m3 via Ollama stub in Phase 2).
- * Real Ollama HTTP invocation deferred to Phase 2C when chunk text is available.
+ * Implemented by IngestEmbeddingRuntimeAdapter in notarist-runtime
+ * (real bge-m3 batch HTTP call via EmbeddingRuntimeWorker).
  */
 public interface EmbeddingPort {
 

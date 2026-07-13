@@ -1,6 +1,5 @@
 package com.notarist.infra.qdrant;
 
-import com.notarist.core.domain.policy.OcrConfidencePolicy;
 import com.notarist.core.domain.valueobject.DocumentId;
 import com.notarist.infra.resilience.DegradedModeRegistry;
 import com.notarist.infra.resilience.NotaristRetryPolicy;
@@ -22,14 +21,14 @@ import java.util.stream.Collectors;
 
 /**
  * Real Qdrant VectorIndexPort implementation.
- * Replaces Phase 2 VectorIndexAdapter no-op stub.
  *
  * Dependency: notarist-infra depends on notarist-ingest for VectorIndexPort interface.
  *
  * Embedding discipline enforced here (not in callers):
  *   - Dimension must be 1024 — rejected before HTTP call
  *   - Checksum computed per-point for audit trail
- *   - is_searchable set from OcrReviewStatus on the chunk payload
+ *   - is_searchable carried from the chunk payload (set by ChunkWorker via
+ *     OcrConfidencePolicy at chunking time)
  *
  * All upserts are batched (one HTTP call per batch).
  * Delete uses Qdrant filter-based delete (all points for a document_id).
@@ -157,13 +156,13 @@ public class QdrantIndexAdapter implements VectorIndexPort {
                 chunk.payload().classificationLevel().name(),
                 chunk.payload().classificationLevel().ordinal(),
                 chunk.payload().documentType().name(),
-                null,   // regulationId — populated by enrichment in Phase 5B
-                null,   // pasalReference — populated by NER output
+                null,   // regulationId — only set for REGULASI corpus documents
+                chunk.payload().pasalRef(),
                 QdrantVectorPayload.EMBEDDING_MODEL,
                 QdrantVectorPayload.EMBEDDING_VERSION,
                 QdrantVectorPayload.REQUIRED_DIMENSION,
                 computeChecksum(chunk.vector()),
-                true,   // is_searchable = true unless OCR review required
+                chunk.payload().searchable(),
                 chunk.payload().sourceObjectKey(),
                 chunk.payload().sectionTitle(),
                 chunk.payload().chunkIndex(),

@@ -12,6 +12,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
 import java.util.List;
@@ -19,7 +20,13 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+/**
+ * VPD identity is applied at the start of each method; @Transactional guarantees the
+ * SET_NOTARIST_CTX call and the subsequent JPA query share one Oracle connection, and
+ * that VpdContextApplier's completion hook clears the identity before the connection is released.
+ */
 @Repository
+@Transactional
 public class DocumentLegalRepositoryImpl implements DocumentLegalRepository {
 
     private final DocumentLegalJpaRepository jpaRepository;

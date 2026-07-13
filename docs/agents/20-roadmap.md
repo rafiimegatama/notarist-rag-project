@@ -126,9 +126,12 @@ the cheapest place to keep adding tests.
    one real document end to end. This is now the highest-value next action: the data flow is
    real but has never executed, and the remaining open audit findings (F4/F7 VPD policies,
    F9 audit-trail persistence, F12 Oracle pool) are all things only a live run will expose.
-2. Work the remaining open audit findings in `production_qa_audit_report.md` — 8 left, with
-   F4 (CRITICAL: VPD policy function `TENANT_ISOLATION_POLICY` referenced but never created),
-   F7 and F9 the highest-severity.
+2. All 21 audit findings in `production_qa_audit_report.md` are now fixed in source — but the
+   SQL/Docker/LLM-dependent ones (F4, F7, F9, F14, F16, F17) are **review-verified only**, never
+   executed. Highest risk is the **fail-closed VPD policy**: if a call site that needs the
+   `set_system_identity` exemption was missed, it silently returns zero rows instead of failing
+   loudly. Smoke-test login, token refresh, document read and one ingestion against a live
+   Oracle+Postgres before trusting it.
 3. Keep extending the domain test suite per [[18-testing-standard]] — `DocumentStatusMachine`,
    `RetryPolicy`, `OcrConfidencePolicy` next. The `PipelineStateMachine` tests already paid for
    themselves by pinning F11; note that finding sat undetected through a full audit *and* a

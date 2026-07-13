@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -95,6 +96,23 @@ public class OllamaRuntimeAdapter implements LlmPort {
                     chunkConsumer.accept(new LlmStreamChunk(request.traceId() + "-" + i, token, false, i));
                 });
         chunkConsumer.accept(new LlmStreamChunk(request.traceId() + "-done", "", true, idx[0]));
+    }
+
+    /** Opens the cancellable scope before the request is queued — see StreamingCancellationManager.open. */
+    @Override
+    public void openStream(String traceId) {
+        cancellationManager.open(traceId);
+    }
+
+    /** Cancels an in-flight or still-queued streaming inference (SSE client gone / emitter timed out). */
+    @Override
+    public boolean cancelStream(String traceId) {
+        return cancellationManager.cancel(traceId);
+    }
+
+    @Override
+    public void closeStream(String traceId) {
+        cancellationManager.deregister(traceId);
     }
 
     @Override
@@ -214,8 +232,11 @@ public class OllamaRuntimeAdapter implements LlmPort {
 
     private String executeStreaming(Request request, String traceId, Consumer<String> tokenConsumer) throws Exception {
         Call call = httpClient.newCall(request);
+        // register() aborts the call immediately if the client already went away while this
+        // request sat in the single-threaded inference queue.
         cancellationManager.register(traceId, call::cancel);
 
+        StringBuilder fullResponse = new StringBuilder();
         try (Response response = call.execute()) {
             if (!response.isSuccessful()) {
                 throw new OllamaCallException("Ollama streaming returned HTTP " + response.code());
@@ -223,7 +244,6 @@ public class OllamaRuntimeAdapter implements LlmPort {
             ResponseBody respBody = response.body();
             if (respBody == null) return fallbackResponse();
 
-            StringBuilder fullResponse = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(respBody.byteStream(), StandardCharsets.UTF_8))) {
 
@@ -246,6 +266,16 @@ public class OllamaRuntimeAdapter implements LlmPort {
                 }
             }
             return fullResponse.toString();
+
+        } catch (IOException e) {
+            // A cancellation aborts the OkHttp call mid-read, which surfaces as an IOException.
+            // That is an expected, deliberate termination — NOT an Ollama failure. Rethrowing it
+            // would mark the OLLAMA runtime degraded for every client that simply disconnected.
+            if (call.isCanceled() || cancellationManager.isCancelled(traceId)) {
+                log.info("OllamaRuntimeAdapter: stream aborted after cancellation traceId={}", traceId);
+                return fullResponse.toString();
+            }
+            throw e;
         } finally {
             cancellationManager.deregister(traceId);
         }

@@ -38,15 +38,31 @@ public class UserRepositoryImpl implements UserRepository {
         this.vpdContextApplier = vpdContextApplier;
     }
 
+    /**
+     * Pre-authentication login lookup. There is no principal yet — this query reads the very row
+     * that reveals the caller's tenant — so it runs as a trusted system session, exempt from the
+     * fail-closed VPD tenant policy (Liquibase V005). Without the exemption the row is invisible
+     * and no one can ever log in.
+     *
+     * <p>Prefer {@link #findByUsernameAndTenantId} anywhere the tenant is already known: that one
+     * runs under the caller's own identity and IS tenant-filtered by the database.
+     */
     @Override
     public Optional<User> findByUsername(String username) {
-        vpdContextApplier.applyIfPresent(entityManager);
+        vpdContextApplier.applySystemIdentity(entityManager);
         return jpaRepository.findByUsername(username).map(mapper::toDomain);
     }
 
+    /**
+     * Looks a user up under the tenant identity of an already-validated session, for flows that
+     * have no authenticated principal (refresh-token rotation on the permitAll /auth/refresh
+     * endpoint). The VPD policy still filters the row by {@code tenantId}: a session whose tenant
+     * does not own the user sees nothing, so this cannot be used to read across tenants.
+     */
     @Override
-    public Optional<User> findById(PersonId userId) {
-        vpdContextApplier.applyIfPresent(entityManager);
+    public Optional<User> findByIdAndTenantId(PersonId userId, UUID tenantId) {
+        vpdContextApplier.applyIdentity(
+                entityManager, userId.value().toString(), tenantId.toString(), null);
         return jpaRepository.findById(userId.value().toString()).map(mapper::toDomain);
     }
 

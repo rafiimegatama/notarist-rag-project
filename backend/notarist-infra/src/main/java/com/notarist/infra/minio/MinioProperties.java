@@ -16,7 +16,8 @@ public record MinioProperties(
         int connectTimeoutMs,
         int readTimeoutMs,
         int writeTimeoutMs,
-        int maxRetries
+        int maxRetries,
+        Boolean autoCreateBuckets
 ) {
     public MinioProperties {
         if (endpoint == null || endpoint.isBlank()) throw new IllegalStateException("notarist.storage.minio.endpoint is required");
@@ -27,11 +28,19 @@ public record MinioProperties(
         if (readTimeoutMs <= 0)    readTimeoutMs    = 30_000;
         if (writeTimeoutMs <= 0)   writeTimeoutMs   = 120_000;
         if (maxRetries <= 0)       maxRetries       = 3;
+        // Boolean (not boolean): absent means "on", not "false".
+        if (autoCreateBuckets == null) autoCreateBuckets = Boolean.TRUE;
     }
 
     /** Raw document storage bucket — used by DocumentStoragePort for upload/confirm/download. */
     public String defaultBucket() {
         return buckets.raw();
+    }
+
+    /** Every bucket the platform reads from or writes to, in provisioning order. */
+    public java.util.List<String> allBuckets() {
+        return java.util.List.of(
+                buckets.raw(), buckets.ocr(), buckets.processed(), buckets.chunk(), buckets.export());
     }
 
     public record Buckets(String raw, String ocr, String processed, String chunk, String export) {

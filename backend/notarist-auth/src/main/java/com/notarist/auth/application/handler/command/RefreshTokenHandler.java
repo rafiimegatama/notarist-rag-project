@@ -55,7 +55,10 @@ public class RefreshTokenHandler implements RefreshTokenUseCase {
                     "AUTH_EXPIRED_REFRESH_TOKEN", "Refresh token expired or invalidated");
         }
 
-        User user = userRepository.findById(existing.getUserId())
+        // Scoped to the tenant carried on the validated session: /auth/refresh is permitAll, so
+        // there is no principal to derive a VPD identity from, and the fail-closed tenant policy
+        // would hide the row from a bare id lookup.
+        User user = userRepository.findByIdAndTenantId(existing.getUserId(), existing.getTenantId())
                 .orElseThrow(() -> new UnauthorizedAccessException(
                         "AUTH_USER_NOT_FOUND", "User no longer exists"));
 

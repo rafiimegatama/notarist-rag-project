@@ -17,8 +17,12 @@ services:
       - "${MINIO_API_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      MINIO_ROOT_USER:     ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-me-in-production}
+      # The application authenticates with MINIO_ACCESS_KEY / MINIO_SECRET_KEY, so the server's
+      # root credentials are derived from those same two variables — there is no second pair to
+      # drift out of sync. MINIO_SECRET_KEY has no default on either side: compose fails loudly
+      # (`:?`) rather than booting a server whose password the app cannot guess.
+      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set — copy .env.example to .env and set it (min 8 chars)}
     volumes:
       - minio-data:/data
     healthcheck:

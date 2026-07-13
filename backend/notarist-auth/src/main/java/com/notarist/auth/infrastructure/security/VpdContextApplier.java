@@ -29,7 +29,61 @@ public class VpdContextApplier {
     private static final Logger log = LoggerFactory.getLogger(VpdContextApplier.class);
 
     private static final String SET_IDENTITY_SQL   = "{ call NOTARIST.SET_NOTARIST_CTX.set_identity(?, ?, ?) }";
+    private static final String SET_SYSTEM_SQL     = "{ call NOTARIST.SET_NOTARIST_CTX.set_system_identity() }";
     private static final String CLEAR_IDENTITY_SQL = "{ call NOTARIST.SET_NOTARIST_CTX.clear_identity() }";
+
+    /**
+     * Marks the session as a trusted system session, exempt from VPD tenant filtering.
+     *
+     * <p>TENANT_ISOLATION_POLICY (Liquibase V005) is fail-closed: a session with no tenant
+     * identity sees no rows. The pre-authentication login lookup has no tenant by definition —
+     * it reads the very row that reveals the tenant — so it must opt out of filtering
+     * explicitly. This is the only exemption in the auth module; do not add others without
+     * understanding that each one is a hole in the F7 backstop.
+     */
+    public void applySystemIdentity(EntityManager entityManager) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            log.warn("VPD system identity requested outside an active transaction — skipping to "
+                    + "avoid cross-connection leakage; ensure the caller is @Transactional");
+            return;
+        }
+
+        entityManager.unwrap(Session.class).doWork(connection -> {
+            try (CallableStatement cs = connection.prepareCall(SET_SYSTEM_SQL)) {
+                cs.execute();
+            }
+        });
+
+        registerClearOnCompletion(entityManager);
+    }
+
+    /**
+     * Applies an explicit VPD identity that does NOT come from the authenticated principal.
+     *
+     * <p>Needed by the refresh-token flow: {@code /api/v1/auth/refresh} is a permitAll endpoint,
+     * so no JWT principal exists and {@link VpdContextHolder} is empty — yet the tenant IS known,
+     * because it is carried on the validated session row. Establishing the real tenant here keeps
+     * the subsequent user lookup database-filtered, instead of reaching for the blunt system
+     * exemption. Callers must have already validated the session the identity is derived from.
+     */
+    public void applyIdentity(EntityManager entityManager, String userId, String tenantId, String role) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            log.warn("VPD identity requested outside an active transaction — skipping to avoid "
+                    + "cross-connection leakage; ensure the caller is @Transactional");
+            return;
+        }
+
+        entityManager.unwrap(Session.class).doWork(connection -> {
+            try (CallableStatement cs = connection.prepareCall(SET_IDENTITY_SQL)) {
+                cs.setString(1, userId);
+                cs.setString(2, tenantId);
+                cs.setString(3, role);
+                cs.execute();
+            }
+        });
+
+        registerClearOnCompletion(entityManager);
+    }
 
     public void applyIfPresent(EntityManager entityManager) {
         VpdContextHolder.get().ifPresent(principal -> {
@@ -51,20 +105,29 @@ public class VpdContextApplier {
                 }
             });
 
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void beforeCompletion() {
-                    try {
-                        entityManager.unwrap(Session.class).doWork(connection -> {
-                            try (CallableStatement cs = connection.prepareCall(CLEAR_IDENTITY_SQL)) {
-                                cs.execute();
-                            }
-                        });
-                    } catch (Exception e) {
-                        log.warn("VPD identity clear failed: {}", e.getMessage());
-                    }
+            registerClearOnCompletion(entityManager);
+        });
+    }
+
+    /**
+     * Clears the identity on the SAME connection before it returns to the pool. Without this a
+     * pooled connection keeps the last caller's tenant (or system exemption) and the next
+     * borrower inherits it.
+     */
+    private void registerClearOnCompletion(EntityManager entityManager) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void beforeCompletion() {
+                try {
+                    entityManager.unwrap(Session.class).doWork(connection -> {
+                        try (CallableStatement cs = connection.prepareCall(CLEAR_IDENTITY_SQL)) {
+                            cs.execute();
+                        }
+                    });
+                } catch (Exception e) {
+                    log.warn("VPD identity clear failed: {}", e.getMessage());
                 }
-            });
+            }
         });
     }
 }

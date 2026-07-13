@@ -46,7 +46,7 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
 
     @Override
     public void save(IngestionJob job) {
-        vpdContextApplier.applyIfPresent(entityManager);
+        vpdContextApplier.applyPrincipalOrSystem(entityManager);
         jpaRepository.findById(job.getIngestionId().value().toString())
                 .map(existing -> updateEntity(existing, job))
                 .ifPresentOrElse(
@@ -56,26 +56,26 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
 
     @Override
     public Optional<IngestionJob> findByIngestionId(IngestionId ingestionId) {
-        vpdContextApplier.applyIfPresent(entityManager);
+        vpdContextApplier.applyPrincipalOrSystem(entityManager);
         return jpaRepository.findById(ingestionId.value().toString()).map(this::toDomain);
     }
 
     @Override
     public Optional<IngestionJob> findByJobId(JobId jobId) {
-        vpdContextApplier.applyIfPresent(entityManager);
+        vpdContextApplier.applyPrincipalOrSystem(entityManager);
         return jpaRepository.findByJobId(jobId.value().toString()).map(this::toDomain);
     }
 
     @Override
     public Optional<IngestionJob> findByChecksumAndTenantId(String checksumSha256, UUID tenantId) {
-        vpdContextApplier.applyIfPresent(entityManager);
+        vpdContextApplier.applyPrincipalOrSystem(entityManager);
         return jpaRepository.findByChecksumSha256AndTenantId(checksumSha256, tenantId.toString())
                 .map(this::toDomain);
     }
 
     @Override
     public List<IngestionJob> findByStatusAndTenantId(PipelineStatus status, UUID tenantId, int limit) {
-        vpdContextApplier.applyIfPresent(entityManager);
+        vpdContextApplier.applyPrincipalOrSystem(entityManager);
         return jpaRepository.findByPipelineStatusAndTenantId(
                         status.name(), tenantId.toString(), PageRequest.of(0, limit))
                 .stream().map(this::toDomain).toList();
@@ -83,7 +83,7 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
 
     @Override
     public List<IngestionJob> findFailedAndReadyForRetry(int maxRetries, int limit) {
-        vpdContextApplier.applyIfPresent(entityManager);
+        vpdContextApplier.applyPrincipalOrSystem(entityManager);
         return jpaRepository.findFailedReadyForRetry(Instant.now(), maxRetries, PageRequest.of(0, limit))
                 .stream().map(this::toDomain).toList();
     }

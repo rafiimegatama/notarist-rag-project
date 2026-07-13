@@ -28,6 +28,19 @@
                                        p_tenant_id IN VARCHAR2,
                                        p_role      IN VARCHAR2);
 
+                -- Marks the session as a TRUSTED SYSTEM session, exempt from tenant filtering.
+                --
+                -- TENANT_ISOLATION_POLICY (V005) is fail-CLOSED: a session with no tenant identity
+                -- sees no rows. Two paths legitimately have no tenant and would otherwise be dead:
+                --   1. the pre-authentication login lookup (you must read the user row to learn the
+                --      tenant — a fail-closed policy alone makes login unsatisfiable), and
+                --   2. background ingestion workers, which run outside any HTTP request.
+                -- Those two call sites — and ONLY those — opt in explicitly by calling this.
+                -- The exemption is therefore something a caller must ASK for, never something it
+                -- gets by forgetting to set an identity. A query path that forgets still sees
+                -- nothing, which is the whole point of the F7 backstop.
+                PROCEDURE set_system_identity;
+
                 -- Clears the identity so it never leaks into the next borrower of a pooled connection.
                 PROCEDURE clear_identity;
             END SET_NOTARIST_CTX;
@@ -48,7 +61,18 @@
                     DBMS_SESSION.SET_CONTEXT('NOTARIST_CTX', 'USER_ID',   p_user_id);
                     DBMS_SESSION.SET_CONTEXT('NOTARIST_CTX', 'TENANT_ID', p_tenant_id);
                     DBMS_SESSION.SET_CONTEXT('NOTARIST_CTX', 'USER_ROLE', p_role);
+                    -- A pooled connection previously used by a system session must not stay
+                    -- exempt once a real tenant identity is put on it.
+                    DBMS_SESSION.CLEAR_CONTEXT('NOTARIST_CTX', NULL, 'SYSTEM_SESSION');
                 END set_identity;
+
+                PROCEDURE set_system_identity IS
+                BEGIN
+                    -- Drop any inherited identity first, so a system session can never run with a
+                    -- stale tenant still attached to the pooled connection.
+                    DBMS_SESSION.CLEAR_CONTEXT('NOTARIST_CTX');
+                    DBMS_SESSION.SET_CONTEXT('NOTARIST_CTX', 'SYSTEM_SESSION', 'Y');
+                END set_system_identity;
 
                 PROCEDURE clear_identity IS
                 BEGIN

@@ -16,6 +16,7 @@ import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -79,14 +80,43 @@ public class AssistantOrchestrator implements AssistantUseCase {
 
     @Override
     public AssistantResponse ask(AssistantCommand command) {
+        return execute(command, null);
+    }
+
+    /**
+     * Token-level streaming variant. Identical pipeline to {@link #ask} — same citation-first
+     * ordering, same grounding short-circuit, same post-LLM guard — except step 8 uses
+     * {@link LlmPort#stream} and pushes every token to the sink as it arrives.
+     */
+    @Override
+    public AssistantResponse askStreaming(AssistantCommand command, StreamSink sink) {
+        return execute(command, Objects.requireNonNull(sink, "sink"));
+    }
+
+    @Override
+    public boolean cancelStream(String traceId) {
+        return llmPort.cancelStream(traceId);
+    }
+
+    /** @param sink null → blocking LLM invocation; non-null → token-level streaming. */
+    private AssistantResponse execute(AssistantCommand command, StreamSink sink) {
         long startMs = System.currentTimeMillis();
         UUID retrievalSnapshotId = UUID.randomUUID();
         ResponseTrace trace = ResponseTrace.create(
                 command.queryId(), command.sessionId(),
                 PromptVersion.V1_LEGAL_ID.version(), retrievalSnapshotId);
+        String traceIdStr = trace.traceId().toString();
 
-        MDC.put("traceId",  trace.traceId().toString());
+        MDC.put("traceId",  traceIdStr);
         MDC.put("tenantId", command.tenantId().toString());
+
+        if (sink != null) {
+            // Open the cancellable scope BEFORE retrieval: a client that disconnects while the
+            // request is still queued behind the single inference thread must not leave a doomed
+            // inference to run to completion.
+            llmPort.openStream(traceIdStr);
+            sink.onStart(traceIdStr);
+        }
 
         try {
             metrics.recordInteractionStarted(command.safetyMode());
@@ -128,25 +158,26 @@ public class AssistantOrchestrator implements AssistantUseCase {
                     command.rawQuery(), assembledContext,
                     PromptVersion.V1_LEGAL_ID, retrievalSnapshotId, chunkIds);
 
-            // 8. LLM invocation
+            // 8. LLM invocation — streaming when a sink is attached, blocking otherwise
             LlmRequest llmRequest = LlmRequest.strict(
-                    prompt.systemPrompt(), prompt.userPrompt(), trace.traceId().toString());
-            LlmResponse llmResponse = llmPort.invoke(llmRequest);
-            log.debug("LLM response: stub={} tokens={}", llmResponse.isStub(), llmResponse.completionTokens());
+                    prompt.systemPrompt(), prompt.userPrompt(), traceIdStr);
+            String answerContent = (sink != null)
+                    ? invokeStreaming(llmRequest, sink)
+                    : invokeBlocking(llmRequest);
 
             // 9. Unsupported claim detection (post-LLM)
-            List<String> unsupportedClaims = claimDetector.detect(llmResponse.content(), citations);
+            List<String> unsupportedClaims = claimDetector.detect(answerContent, citations);
 
             // 10. Hallucination guard
             GuardResult guardResult = hallucinationGuard.guard(
-                    llmResponse.content(), preLlmConfidence, unsupportedClaims, command.safetyMode());
+                    answerContent, preLlmConfidence, unsupportedClaims, command.safetyMode());
             log.debug("HallucinationGuard: passed={} downgraded={} warnings={}",
                     guardResult.passed(), guardResult.downgraded(), guardResult.warnings().size());
 
             // 11. Resolve final answer text
             String finalAnswer = guardResult.downgraded()
                     ? hallucinationGuard.getFallbackMessage()
-                    : llmResponse.content();
+                    : answerContent;
 
             // 12. Follow-up suggestions
             List<FollowUpSuggestion> followUps = followUpService.suggest(command.rawQuery(), finalAnswer);
@@ -184,9 +215,34 @@ public class AssistantOrchestrator implements AssistantUseCase {
             log.error("Assistant error traceId={}: {}", trace.traceId(), e.getMessage(), e);
             return AssistantResponse.error(trace.withProcessingMs(processingMs), e.getMessage());
         } finally {
+            if (sink != null) llmPort.closeStream(traceIdStr);
             MDC.remove("traceId");
             MDC.remove("tenantId");
         }
+    }
+
+    private String invokeBlocking(LlmRequest llmRequest) {
+        LlmResponse llmResponse = llmPort.invoke(llmRequest);
+        log.debug("LLM response: stub={} tokens={}", llmResponse.isStub(), llmResponse.completionTokens());
+        return llmResponse.content();
+    }
+
+    /**
+     * Drives the real token-level path (Ollama NDJSON). Tokens go to the sink as they arrive and
+     * are accumulated so the post-LLM guard still sees the complete answer. A cancelled stream
+     * simply ends early: the accumulated text is whatever the model produced before the abort.
+     */
+    private String invokeStreaming(LlmRequest llmRequest, StreamSink sink) {
+        StringBuilder accumulated = new StringBuilder();
+        llmPort.stream(llmRequest, chunk -> {
+            if (chunk.done()) return;
+            String delta = chunk.delta();
+            if (delta == null || delta.isEmpty()) return;
+            accumulated.append(delta);
+            sink.onToken(delta);
+        });
+        log.debug("LLM stream complete: chars={}", accumulated.length());
+        return accumulated.toString();
     }
 
     private SearchPort.AssistantSearchRequest toSearchRequest(AssistantCommand command, UUID correlationId) {

@@ -21,11 +21,64 @@ Findings were fixed in five scoped rounds after the original audit, each re-veri
 | 3 — VPD leakage | F5, F6 | `./gradlew build` → SUCCESSFUL; `bootRun` re-run, no regression |
 | 4 — DLQ/retry counters | F10 (found already fixed pre-round), F15 | `./gradlew build` → SUCCESSFUL; `bootRun` re-run, no regression |
 | 5 — real ingestion pipeline | F18, F11, F20 | Real chunk/embed/index data flow (`DocumentChunker`, `ChunkMetadataRepository` + Flyway `V6`, NER/embedding runtime adapters). F11/F20 fixed together: the dead `EMBED_PENDING` branch in `nextPendingStage` (F20) *was* the F11 stall — after embedding, a job's status is already `INDEX_PENDING`, which that switch never matched, so no INDEX row was ever enqueued and chunks never reached Qdrant. Verified by `./gradlew build --rerun-tasks` → SUCCESSFUL (12 modules) **and the project's first tests** (`PipelineStateMachineTest`, 4 tests): confirmed red against the old mapping (2 failures, including the full-pipeline walk), green after |
+| 6 — remaining 9 findings (3 parallel agents) | F4, F7, F12 · F9, F14 · F16, F17, F19, F21 | Three agents worked disjoint lanes (Oracle/VPD · audit+auth · ops/runtime), then the combined tree was built as one: `./gradlew build --rerun-tasks` → SUCCESSFUL (12 modules), **18 tests, 0 failures** (`PipelineStateMachineTest` 4, `RetryPolicyTest` 8, `AuditEventListenerTest` 6). Two cross-agent inconsistencies were caught and reconciled afterwards — see below |
 | — | F3 | Fixed alongside F1 (same config-binding pass); resolves F13 as a side effect |
+
+### Fail-closed VPD (the F7 decision worth knowing about)
+
+The first cut of the tenant predicate returned `1 = 1` — unrestricted — whenever no tenant context
+was set, because two paths legitimately have no tenant: the pre-authentication login lookup (you
+must read the user row to learn the tenant) and the background ingestion workers. That is a
+defensible reading, and it is also **self-defeating**: F7 exists precisely to backstop a query path
+that forgets its app-level tenant filter, and a fail-open predicate hands exactly that path every
+tenant's rows. It would have hardened the paths that were already correct and done nothing for the
+ones that aren't.
+
+The predicate is therefore **fail-closed** (`1 = 0` on an unset context), with a narrow exemption
+that must be *asked for*: `SET_NOTARIST_CTX.set_system_identity` (V004). It is invoked in exactly
+two places, and each one is deliberate:
+
+| Path | Why it cannot carry a tenant | What it does |
+|---|---|---|
+| `UserRepositoryImpl.findByUsername` | pre-auth login; reads the row that *reveals* the tenant | takes the system exemption |
+| ingest repositories (background workers) | no principal; legitimately span all tenants | `applyPrincipalOrSystem` — principal if present, else system |
+
+Two paths that looked like they needed the exemption but **don't**, and are strictly better for it:
+
+- **Refresh-token rotation.** `/api/v1/auth/refresh` is `permitAll`, so there is no principal — a
+  bare `findById` would have returned nothing under fail-closed and **broken token refresh for
+  every user**. But the tenant *is* known: it is carried on the validated session row. So
+  `UserRepository.findById(PersonId)` was **replaced** by `findByIdAndTenantId(...)`, which
+  establishes the session's real tenant identity and stays database-filtered. The bare `findById`
+  is gone rather than left behind as a fail-closed landmine.
+- **`DOKUMEN_LEGAL`** — the sensitive legal content — is reached only from authenticated document
+  handlers. It has **no exemption path at all**, so it is strictly tenant-filtered by the database.
+
+Residual risk, stated plainly: the exemption is only as tight as its call sites. Every new caller of
+`set_system_identity` widens the hole. `USER_ROLE_MAP` still has no tenant column and is isolated
+only transitively (FK to a policy-filtered `NOTARIST_USER`).
+
+### Verification honesty
+
+`./gradlew build` and 18 passing tests prove the code **compiles and its pure logic is correct**.
+They prove nothing about the SQL. No Oracle, PostgreSQL, Docker, MinIO or Ollama exists in this
+environment, so: the VPD policies and predicate function, the Flyway `V7` DDL, MinIO bucket
+provisioning, and the SSE token-stream/cancel path have **never been executed**. Their fixes are
+review-verified only.
+
+This matters more than usual here. F11 — a HIGH-severity stall that made the entire ingestion
+pipeline inert — survived the original audit *and* four remediation rounds, because everything was
+verified by "does it compile" and careful reading. Both are exactly the kind of defect that only a
+live run surfaces. **The fail-closed VPD change is the highest-risk item in this batch**: if a call
+site that needs the system exemption was missed, that query silently returns zero rows rather than
+failing loudly. A live migration + smoke test of login, token refresh, document read and one
+end-to-end ingestion is the required next step before this is called done.
 
 **F2 and F10 note:** both were found already resolved in the working tree at the start of their respective rounds (the `autoCommit=false` line and the two-statement SKIP LOCKED race were already gone from source before I inspected them for those rounds). This report records them as fixed with the evidence of their current, correct state — no separate diff exists for them within this remediation effort.
 
-Remaining open findings (still present in source): **F4, F7, F9, F12, F14, F16 (partial), F17, F19, F21.**
+**All 21 findings are now marked fixed.** What that does and does not mean is spelled out in
+“Verification honesty” below — most of the remaining fixes are compile- and review-verified only,
+because no Oracle, PostgreSQL, Docker, MinIO or Ollama exists in this environment.
 
 ---
 
@@ -46,7 +99,7 @@ Remaining open findings (still present in source): **F4, F7, F9, F12, F14, F16 (
 
 Anything requiring live infrastructure (scheduler execution, retry timing, DLQ escalation, VPD enforcement, SKIP LOCKED behaviour, Oracle locking) is marked **NOT VERIFIED** and reasoned from source only.
 
-**Test suite:** `find … -path "*test*" *.java` → **0 test files.** There is no automated test coverage anywhere in the repository. (Checklist item: test-coverage — VERIFIED absent.)
+**Test suite (at time of original audit):** `find … -path "*test*" *.java` → **0 test files.** No automated test coverage existed anywhere in the repository. Remediation rounds 5–6 introduced the first tests — now **18 passing** across `PipelineStateMachineTest` (4), `RetryPolicyTest` (8) and `AuditEventListenerTest` (6). That is a beachhead, not coverage: every adapter, handler and worker remains untested.
 
 ---
 
@@ -57,26 +110,30 @@ Anything requiring live infrastructure (scheduler execution, retry timing, DLQ e
 | F1 | CRITICAL | JWT config property namespace mismatch → application cannot start | VERIFIED (runtime) | ✅ **FIXED** — `application.yaml` rebound to `notarist.auth.jwt.*` (seconds, no `file:` prefix) |
 | F2 | CRITICAL | Ingest PostgreSQL datasource has `autoCommit=false` with no transaction manager → queue writes never commit | VERIFIED (static) | ✅ **FIXED** — `setAutoCommit(false)` removed; pool now uses Hikari's `autoCommit=true` default |
 | F3 | CRITICAL | Ingest datasource bound to undefined `notarist.postgres.*` namespace → wrong DB/credentials | VERIFIED (static) | ✅ **FIXED** — `notarist.postgres.*` / `notarist.minio.*` added to `application.yaml`, aligned to the same DB/credentials as `notarist.database.postgres.*` |
-| F4 | CRITICAL | VPD policy function `TENANT_ISOLATION_POLICY` referenced but never created | VERIFIED (static) | ❌ OPEN |
+| F4 | CRITICAL | VPD policy function `TENANT_ISOLATION_POLICY` referenced but never created | VERIFIED (static) | ✅ **FIXED** — new Liquibase `V005__vpd_tenant_policies.xml` creates `NOTARIST.TENANT_ISOLATION_POLICY`, reading the same `NOTARIST_CTX`/`TENANT_ID` attribute the V004 trusted package actually writes. **SQL never executed — no Oracle available.** |
 | F5 | HIGH | VPD application context bound to package `SET_NOTARIST_CTX` that is never created; Java calls `DBMS_SESSION.SET_CONTEXT` directly | VERIFIED (static) / behaviour NOT VERIFIED | ✅ **FIXED** — new Liquibase `V004__vpd_context_package.xml` creates the trusted package; appliers now call `SET_NOTARIST_CTX.set_identity(...)` |
 | F6 | HIGH | VPD `SET_CONTEXT` runs outside any transaction → set on a different connection than the query; context never cleared | VERIFIED (static) | ✅ **FIXED** — appliers require an active transaction and register a `clear_identity()` completion hook; Oracle repositories now `@Transactional` |
-| F7 | HIGH | VPD row-level policy applied only to `INGESTION_JOB`; `DOKUMEN_LEGAL` and `NOTARIST_USER` have none | VERIFIED (static) | ❌ OPEN |
+| F7 | HIGH | VPD row-level policy applied only to `INGESTION_JOB`; `DOKUMEN_LEGAL` and `NOTARIST_USER` have none | VERIFIED (static) | ✅ **FIXED** — policies added for `DOKUMEN_LEGAL` and `NOTARIST_USER`, and the predicate is **fail-closed** (no tenant identity ⇒ no rows). See “Fail-closed VPD” below: a fail-open predicate would have left F7’s actual complaint (a forgotten filter leaks cross-tenant rows) unaddressed. `USER_ROLE_MAP` has no tenant column — isolated transitively via FK; recorded as a residual gap. **SQL never executed.** |
 | F8 | HIGH | Refresh-token rotation is not atomic → token-reuse / double-issue race | VERIFIED (static) | ✅ **FIXED** — added `SessionTokenRepository.invalidateIfActive(...)`, an atomic `UPDATE … WHERE invalidated=false` compare-and-set gating token issuance |
-| F9 | HIGH | Audit events published to the event bus are never consumed/persisted → total audit-trail loss | VERIFIED (static) | ❌ OPEN |
+| F9 | HIGH | Audit events published to the event bus are never consumed/persisted → total audit-trail loss | VERIFIED (static) | ✅ **FIXED** — `AuditEventListener` (+ `RecordAuditEventHandler`, `AuditTrailRepositoryImpl`) now consume and persist `AuditEventPayload` to PostgreSQL `audit_trail` (Flyway `V7`). Plain `@EventListener`, not `AFTER_COMMIT` — a failed login has no committing tx and would otherwise be lost. Fail-closed for AUTH/SECURITY/DOCUMENT. **DDL never executed.** |
 | F10 | HIGH | Queue `FOR UPDATE SKIP LOCKED` is ineffective as used (select + lock on separate connections, non-transactional poll) | VERIFIED (static) | ✅ **FIXED** — dequeue is now a single atomic `UPDATE … WHERE queue_job_id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING …` statement |
 | F11 | HIGH | Pipeline stalls after EMBED: INDEX stage is never enqueued (state-machine asymmetry) | VERIFIED (static) | ✅ **FIXED** — `nextPendingStage` now routes the post-embed status (`INDEX_PENDING`) to the INDEX stage; covered by `PipelineStateMachineTest` |
-| F12 | MEDIUM | Oracle `DataSource` is an unpooled skeleton (`TODO`); ignores configured pool sizing | VERIFIED (static) | ❌ OPEN |
+| F12 | MEDIUM | Oracle `DataSource` is an unpooled skeleton (`TODO`); ignores configured pool sizing | VERIFIED (static) | ✅ **FIXED** — `DataSourceConfig` now builds a `HikariDataSource` honouring `pool-max`/`pool-min` plus connection/idle/max-lifetime timeouts. |
 | F13 | MEDIUM | Two divergent PostgreSQL pools; `ingestion_queue` migrated into search DB but read from a different default DB | VERIFIED (static) | ✅ **FIXED** (side effect of F3) — both pools now default to the same `notarist_search` DB/credentials |
-| F14 | MEDIUM | In-memory `TokenDenyList` → revoked tokens accepted by other instances / after restart | VERIFIED (static) | ❌ OPEN |
+| F14 | MEDIUM | In-memory `TokenDenyList` → revoked tokens accepted by other instances / after restart | VERIFIED (static) | ✅ **FIXED** — `ConcurrentHashMap` replaced by a PostgreSQL-backed `token_deny_list` (Flyway `V7`); revocation now survives restart and is shared across instances. Redis deliberately not introduced (not in the stack). |
 | F15 | MEDIUM | Retry counter double-bookkeeping (queue `attempt_count` vs job `retryCount`) | VERIFIED (static) | ✅ **FIXED** — `job.retryCount` is now the single counter driving both the coordinator's retry decision and the queue mirror; queue row is marked terminal `FAILED` instead of re-`PENDING`, leaving `RetryPolicyService` as the sole re-enqueue driver |
-| F16 | MEDIUM | MinIO credential default mismatch + buckets never provisioned | VERIFIED (static) | ⚠️ PARTIAL — endpoint/access-key/secret-key namespace drift resolved by the F3 fix (ingest `notarist.minio.*` now aligned); bucket provisioning still absent |
-| F17 | MEDIUM | SSE endpoint does not stream and does not cancel inference on client disconnect | VERIFIED (static) | ❌ OPEN |
+| F16 | MEDIUM | MinIO credential default mismatch + buckets never provisioned | VERIFIED (static) | ✅ **FIXED** — `MinioBucketProvisioner` (`ApplicationRunner`) creates the five buckets if absent, marking the service degraded rather than failing silently; the competing credential default was removed entirely (`MINIO_SECRET_KEY` now has **no default**, so compose fails loudly via `:?`). **Never executed — no Docker/MinIO available.** |
+| F17 | MEDIUM | SSE endpoint does not stream and does not cancel inference on client disconnect | VERIFIED (static) | ✅ **FIXED** — `askStream` now emits real tokens via the runtime streaming path and registers `onTimeout`/`onError`/`onCompletion` hooks that cancel in-flight inference through `StreamingCancellationManager`. Two extra races fixed while wiring (cancel-before-register; a cancelled call marking the whole OLLAMA runtime degraded). **Never executed — no Ollama available.** |
 | F18 | LOW | Core ingestion workers (OCR/NER/Chunk/Embed/Index) are stubs → `chunk_index` never populated, search returns nothing | VERIFIED (static) | ✅ **FIXED** — real `DocumentChunker`, `ChunkMetadataRepository` (+ Flyway `V6`), NER/embedding runtime adapters; `IndexingWorker` now upserts real per-chunk embeddings and carries `searchable` (OCR gating) into Qdrant instead of a stub zero-vector |
-| F19 | LOW | `RetryPolicy` backoff off-by-one vs its own contract | VERIFIED (static) | ❌ OPEN |
+| F19 | LOW | `RetryPolicy` backoff off-by-one vs its own contract | VERIFIED (static) | ✅ **FIXED** — `base * 2^(attempt-1)` ⇒ 30/60/120s, matching the javadoc; retry-count semantics and the 3600s cap unchanged. Pinned by `RetryPolicyTest` (8 tests, confirmed red against the old behaviour first). |
 | F20 | LOW | Dead/unreachable branch in `PipelineStateMachine.nextPendingStage` | VERIFIED (static) | ✅ **FIXED** — the unreachable `EMBED_PENDING` branch was the F11 root cause; removed by the same fix |
-| F21 | LOW | Prometheus actuator endpoint exposed but not permitted → self-scrape 401 | VERIFIED (static) | ❌ OPEN |
+| F21 | LOW | Prometheus actuator endpoint exposed but not permitted → self-scrape 401 | VERIFIED (static) | ✅ **FIXED** — `/actuator/prometheus` + `/actuator/metrics` permitted for loopback/RFC1918 sources only (previously `/actuator/metrics` was fully public, now tightened). Defence-in-depth, not a substitute for network policy. |
 
-**Fixed: 12 of 21** (F1, F2, F3, F5, F6, F8, F10, F11, F15, F18, F20 — plus F13 as a side-effect resolution) **+ 1 partial** (F16). **8 remain open**: F4, F7, F9, F12, F14, F17, F19, F21.
+**Fixed: 21 of 21.** Every finding from the original audit is now addressed in source. Read
+“Verification honesty” above before treating that as a clean bill of health: the SQL-, Docker- and
+LLM-dependent fixes (F4, F7, F9, F14, F16, F17) are review-verified only — nothing exercised them
+against live infrastructure, which is precisely how the HIGH-severity F11 stall survived an audit
+and four remediation rounds.
 
 ---
 

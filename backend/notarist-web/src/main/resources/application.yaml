@@ -56,8 +56,13 @@ notarist:
       url: ${ORACLE_URL:jdbc:oracle:thin:@localhost:1521/NOTARISTDB}
       username: ${ORACLE_USER:notarist_app}
       password: ${ORACLE_PASSWORD}
+      # HikariCP pool bounds — honoured by DataSourceConfig.oracleDataSource().
       pool-max: ${ORACLE_POOL_MAX:10}
       pool-min: ${ORACLE_POOL_MIN:2}
+      connection-timeout-ms: ${ORACLE_CONNECTION_TIMEOUT_MS:30000}
+      idle-timeout-ms: ${ORACLE_IDLE_TIMEOUT_MS:600000}
+      max-lifetime-ms: ${ORACLE_MAX_LIFETIME_MS:1800000}
+      validation-timeout-ms: ${ORACLE_VALIDATION_TIMEOUT_MS:5000}
     postgres:
       url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/notarist_search}
       username: ${POSTGRES_USER:notarist_app}
@@ -76,7 +81,9 @@ notarist:
   minio:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     access-key: ${MINIO_ACCESS_KEY:minioadmin}
-    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    # No default: a shipped secret-key default silently disagreed with the MinIO server's
+    # MINIO_ROOT_PASSWORD and produced 403s at first use. Startup now fails loudly if unset.
+    secret-key: ${MINIO_SECRET_KEY}
 
   storage:
     qdrant:
@@ -86,8 +93,13 @@ notarist:
     minio:
       endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
       access-key: ${MINIO_ACCESS_KEY:minioadmin}
-      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      # Must equal the MinIO server's MINIO_ROOT_PASSWORD (docker-compose). Intentionally has no
+      # default — see notarist.minio.secret-key above.
+      secret-key: ${MINIO_SECRET_KEY}
       upload-url-ttl-minutes: ${MINIO_UPLOAD_URL_TTL_MINUTES:15}
+      # Create-if-absent on startup (MinioBucketProvisioner). Set false when buckets are
+      # provisioned externally and the app credential may not create them.
+      auto-create-buckets: ${MINIO_AUTO_CREATE_BUCKETS:true}
       buckets:
         raw: ${MINIO_BUCKET_RAW:notarist-raw}
         ocr: ${MINIO_BUCKET_OCR:notarist-ocr}

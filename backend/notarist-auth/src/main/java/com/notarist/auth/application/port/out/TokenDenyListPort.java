@@ -4,7 +4,8 @@ import java.time.Duration;
 
 /**
  * Port for JWT access token deny-listing on logout.
- * Backed by Redis in production; in-memory for local/dev.
+ * Backed by the shared PostgreSQL token_deny_list table (durable and cluster-wide) —
+ * see TokenDenyListRepositoryImpl for why PostgreSQL rather than Redis.
  * Entry TTL = remaining access token validity.
  */
 public interface TokenDenyListPort {

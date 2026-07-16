@@ -30,7 +30,10 @@ public class ModelRegistry {
             @Value("${notarist.sidecar.ollama.base-url:http://localhost:11434}") String ollamaUrl,
             @Value("${notarist.sidecar.embedding.base-url:http://localhost:8084}") String embeddingUrl,
             @Value("${notarist.sidecar.reranker.base-url:http://localhost:8083}") String rerankerUrl,
-            @Value("${notarist.sidecar.ocr.base-url:http://localhost:8081}") String ocrUrl,
+            // Resolve OCR from the SAME property the real provider (PaddleOcrProvider/OcrProperties)
+            // uses, so the startup probe and runtime traffic can never target different hosts. Falls
+            // back to the legacy sidecar key, then localhost.
+            @Value("${notarist.ocr.providers.paddle.endpoint:${notarist.sidecar.ocr.base-url:http://localhost:8081}}") String ocrUrl,
             @Value("${notarist.sidecar.ner.base-url:http://localhost:8082}") String nerUrl) {
         registry = Map.of(
                 ModelProvider.OLLAMA, new ModelDefinition(

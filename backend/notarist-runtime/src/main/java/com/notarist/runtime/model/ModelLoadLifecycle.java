@@ -92,7 +92,9 @@ public class ModelLoadLifecycle {
     private void verifyReranker() {
         ModelDefinition model = modelRegistry.getReranker();
         try {
-            var body = Map.of("query", WARMUP_TEXT, "texts", new String[]{WARMUP_TEXT});
+            // Field is "passages" — the reranker sidecar's RerankRequest. Sending "texts" here made
+            // Pydantic default passages=[], hitting the empty early-return so the model never warmed.
+            var body = Map.of("query", WARMUP_TEXT, "passages", new String[]{WARMUP_TEXT});
             restTemplate.postForEntity(model.endpointUrl() + "/rerank", body, Map.class);
             degradationManager.markRuntime(RuntimeDegradationManager.AiRuntime.RERANKER, false, null);
             log.info("Reranker OK: {} @ {}", model.modelName(), model.endpointUrl());

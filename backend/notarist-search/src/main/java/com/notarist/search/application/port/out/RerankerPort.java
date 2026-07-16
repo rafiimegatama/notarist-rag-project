@@ -4,8 +4,8 @@ import java.util.List;
 
 /**
  * Output port for cross-encoder reranking.
- * Implemented by RerankerAdapter (identity stub in Phase 3).
- * Real cross-encoder HTTP call deferred to Phase 4.
+ * Implemented by RegistryRerankerPort (notarist-runtime), which routes to the active
+ * RerankerProvider (none = passthrough, or crossencoder = bge-reranker-v2-m3 HTTP sidecar).
  */
 public interface RerankerPort {
 

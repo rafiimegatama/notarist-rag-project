@@ -58,6 +58,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @SuppressWarnings("unchecked")
             List<String> roleNames = claims.get("roles", List.class);
 
+            // A signature-valid token that is missing a required claim must fail closed as a clean
+            // 401, not NPE into a 500. issueAccessToken always sets all three, so this only trips on
+            // a malformed/forged-shape token.
+            if (userId == null || tenantId == null || roleNames == null) {
+                throw new JwtService.InvalidTokenException("Token missing required claim (sub/tenantId/roles)", null);
+            }
+
             Collection<SimpleGrantedAuthority> authorities = roleNames.stream()
                     .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
                     .collect(Collectors.toList());

@@ -32,18 +32,10 @@ CREATE INDEX idx_session_token_expires
     ON session_token (expires_at)
     WHERE invalidated = FALSE;
 
--- -------------------------------------------------------
--- token_deny_list: Revoked JWT JTI tracking
--- -------------------------------------------------------
-CREATE TABLE IF NOT EXISTS token_deny_list (
-    jti        VARCHAR(36)  NOT NULL,
-    expires_at TIMESTAMPTZ  NOT NULL,
-
-    CONSTRAINT pk_token_deny_list PRIMARY KEY (jti)
-);
-
-CREATE INDEX idx_token_deny_list_expires
-    ON token_deny_list (expires_at);
+-- token_deny_list is intentionally NOT created here. It is owned solely by
+-- V7__audit_trail_and_token_deny_list.sql, whose definition adds the revoked_at column and a
+-- wider jti (VARCHAR(100)). Creating it here first would win the CREATE TABLE IF NOT EXISTS race
+-- and permanently strip revoked_at from a from-empty migration, breaking logout's INSERT.
 
 -- -------------------------------------------------------
 -- document_chunk: Chunked text for vector indexing

@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# DEV — cheap, permissive, disposable.
+#
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored: it carries no secrets
+# (those live in Secret Manager), but it does carry project-identifying detail.
+# ---------------------------------------------------------------------------
+
+project_id  = "notarist-dev-000000"
+environment = "dev"
+region      = "asia-southeast2"
+
+# First create only. Cloud Build owns the image afterwards.
+# Until the first image is pushed, point at a placeholder that starts and serves /actuator/health,
+# or the initial apply will create a service that never becomes Ready.
+image = "asia-southeast2-docker.pkg.dev/notarist-dev-000000/notarist/notarist-backend:bootstrap"
+
+# ---- Cloud Run ----
+# Even in dev the schedulers need a warm instance, or ingestion silently does nothing and you spend
+# an afternoon debugging an "empty queue" that was never polled.
+run_in_process_schedulers = true
+max_instances             = 2
+cpu                       = "1"
+memory                    = "1Gi"
+
+# Public: the app enforces its own JWT auth.
+invoker_members = ["allUsers"]
+
+# ---- Supabase ----
+postgres_url      = "jdbc:postgresql://db.CHANGEME.supabase.co:5432/postgres?sslmode=require"
+postgres_user     = "notarist_app"
+postgres_pool_max = 5
+
+# ---- Qdrant ----
+qdrant_url        = "https://CHANGEME.cloud.qdrant.io:6333"
+qdrant_collection = "notarist_chunks"
+
+# ---- Storage ----
+# Bucket names share ONE global namespace across all of Google Cloud. Replace the 000000 suffix with
+# something project-specific (the project number works) or the apply fails on a name already taken.
+documents_bucket_name           = "notarist-dev-documents-000000"
+ocr_output_bucket_name          = "notarist-dev-ocr-output-000000"
+generated_documents_bucket_name = "notarist-dev-generated-documents-000000"
+application_assets_bucket_name  = "notarist-dev-application-assets-000000"
+
+bucket_location = "ASIA-SOUTHEAST2"
+# Dev only: lets `terraform destroy` clean up a bucket with test documents in it.
+bucket_force_destroy = true
+cors_origins         = ["http://localhost:8081", "http://localhost:19006"]
+
+# ---- Network ----
+# Off in dev: a VPC connector runs VMs 24/7 and nothing is allowlisting dev.
+enable_vpc_egress = false
+
+# ---- Sidecars ----
+# NOT deployed by this Terraform. Fill these in once the OCR/NER/reranker/embedding services exist,
+# or ingestion will stall at the OCR stage.
+sidecar_urls = {
+  # OCR_BASE_URL       = "https://ocr-dev-xxxx.a.run.app"
+  # NER_BASE_URL       = "https://ner-dev-xxxx.a.run.app"
+  # RERANKER_BASE_URL  = "https://reranker-dev-xxxx.a.run.app"
+  # EMBEDDING_BASE_URL = "https://embedding-dev-xxxx.a.run.app"
+  # OLLAMA_BASE_URL    = "https://ollama-dev-xxxx.a.run.app"
+}
+
+# ---- Observability ----
+log_level             = "DEBUG"
+alert_email_addresses = [] # No alerts in dev.
+enable_uptime_check   = false
+
+# ---------------------------------------------------------------------------
+# Logging (Sprint TF2, Task 8)
+# ---------------------------------------------------------------------------
+# Non-prod: keep the free 30-day default and skip the audit bucket. The audit trail that matters
+# for compliance is prod's; paying to retain dev's for 13 months buys nothing.
+log_retention_days      = 30
+create_audit_log_bucket = false
+
+# ---------------------------------------------------------------------------
+# Budget (Sprint TF2, Task 9)
+# ---------------------------------------------------------------------------
+# billing_account_id  = "01ABCD-2345EF-6789GH"
+# project_number      = "123456789012"
+monthly_budget_amount = 25

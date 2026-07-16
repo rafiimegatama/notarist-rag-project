@@ -1,0 +1,188 @@
+# =============================================================================
+# Terraform CI — fmt, lint, validate, plan.
+#
+# This workflow does not change infrastructure. There is no apply job, and that is deliberate:
+# terraform APPLY authority lives with the Cloud Build deployer (cloudbuild/cloudbuild.yaml), not
+# with GitHub Actions. A workflow file can be edited by anyone with write access to the repo, so an
+# apply here would mean "repo write == project admin". The GitHub Actions service account is
+# therefore granted roles/viewer and nothing that can mutate the project
+# (see terraform/modules/service_account/github_actions.tf).
+#
+# Two tiers of job, split by whether they need Google credentials:
+#
+#   fmt / lint / validate  — pure static analysis. No credentials, no variables. These run on every
+#                            PR from day one, including forks.
+#   plan                   — needs to read real cloud state, so it needs both Workload Identity and
+#                            the input variables. It SKIPS cleanly when those are not configured
+#                            rather than failing a PR with a credentials error.
+#
+# ---------------------------------------------------------------------------
+# Repository configuration (Settings → Secrets and variables → Actions → Variables)
+#
+# None of these are secrets — a WIF provider name and a project ID are useless without a token
+# GitHub will only mint for this repository — so they are variables, not secrets:
+#
+#   GHA_WIF_PROVIDER      terraform output github_actions_wif_provider
+#   GHA_SERVICE_ACCOUNT   terraform output github_actions_service_account
+#   GCP_PROJECT_ID_DEV    the dev project ID          (likewise _STAGING / _PROD)
+#   TF_STATE_BUCKET_DEV   the state bucket from bootstrap
+#   ...plus the per-environment inputs listed in the plan job below.
+#
+# Leave GHA_WIF_PROVIDER unset and everything below the validate job simply does not run.
+# =============================================================================
+
+name: terraform
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+
+# A second push to the same PR makes the first plan irrelevant. Cancel it rather than pay for it.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege at the workflow level. id-token: write is what lets the runner request an OIDC
+# token from GitHub — it is NOT permission to write to the repository.
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.9.8"
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Static analysis. No credentials — these must pass on every PR.
+  # ---------------------------------------------------------------------------
+  static:
+    name: fmt / lint / validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+        working-directory: terraform
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: tflint
+        run: tflint --recursive --no-color
+        working-directory: terraform
+
+      # -backend=false: validate is a static check of the configuration and must not need a state
+      # bucket or credentials to run. Every root is checked, so a change to a shared module cannot
+      # break staging while dev still passes.
+      - name: terraform validate (all roots)
+        working-directory: terraform
+        run: |
+          set -euo pipefail
+          FAILED=0
+          for root in bootstrap environments/dev environments/staging environments/prod; do
+            echo "::group::validate $root"
+            terraform -chdir="$root" init -backend=false -input=false -no-color
+            terraform -chdir="$root" validate -no-color || FAILED=1
+            echo "::endgroup::"
+          done
+          exit $FAILED
+
+  # ---------------------------------------------------------------------------
+  # Plan. Reads real state, so it needs credentials and inputs.
+  # ---------------------------------------------------------------------------
+  plan:
+    name: plan (${{ matrix.environment }})
+    needs: static
+    # Skips rather than fails when Workload Identity has not been configured yet. A repo whose
+    # infrastructure is not yet bootstrapped should still get green PRs from the static job.
+    if: vars.GHA_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false # A broken dev plan should not hide the state of prod.
+      matrix:
+        environment: [dev, staging, prod]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Keyless. Exchanges GitHub's short-lived OIDC token for a ~1h Google access token; no service
+      # account JSON key exists anywhere in this repository or its secrets.
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GHA_WIF_PROVIDER }}
+          service_account: ${{ vars.GHA_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform init
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          terraform init -input=false -no-color \
+            -backend-config="bucket=${{ vars[format('TF_STATE_BUCKET_{0}', matrix.environment)] }}"
+
+      # terraform.tfvars is gitignored on purpose (it carries project-identifying detail), so CI
+      # supplies the inputs through TF_VAR_*. These are configuration, not credentials — every actual
+      # secret lives in Secret Manager and is referenced by name, never passed through Terraform.
+      - name: terraform plan
+        working-directory: terraform/environments/${{ matrix.environment }}
+        env:
+          TF_VAR_environment: ${{ matrix.environment }}
+          TF_VAR_project_id: ${{ vars[format('GCP_PROJECT_ID_{0}', matrix.environment)] }}
+          TF_VAR_image: ${{ vars[format('TF_IMAGE_{0}', matrix.environment)] }}
+          TF_VAR_postgres_url: ${{ vars[format('TF_POSTGRES_URL_{0}', matrix.environment)] }}
+          TF_VAR_qdrant_url: ${{ vars[format('TF_QDRANT_URL_{0}', matrix.environment)] }}
+          TF_VAR_documents_bucket_name: ${{ vars[format('TF_BUCKET_DOCUMENTS_{0}', matrix.environment)] }}
+          TF_VAR_ocr_output_bucket_name: ${{ vars[format('TF_BUCKET_OCR_OUTPUT_{0}', matrix.environment)] }}
+          TF_VAR_generated_documents_bucket_name: ${{ vars[format('TF_BUCKET_GENERATED_{0}', matrix.environment)] }}
+          TF_VAR_application_assets_bucket_name: ${{ vars[format('TF_BUCKET_ASSETS_{0}', matrix.environment)] }}
+          TF_VAR_enable_github_actions: "true"
+          TF_VAR_github_repository: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+
+      # A plan is only useful if someone reads it. Put the summary where the review happens.
+      - name: comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const dir = 'terraform/environments/${{ matrix.environment }}';
+            let plan = fs.readFileSync(`${dir}/plan.txt`, 'utf8');
+
+            // GitHub rejects comments over 65536 chars. Truncate rather than lose the comment.
+            const LIMIT = 60000;
+            if (plan.length > LIMIT) {
+              plan = plan.slice(0, LIMIT) + '\n\n...truncated. See the full plan in the job log.';
+            }
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `#### Terraform plan — \`${{ matrix.environment }}\`\n\n<details><summary>Show plan</summary>\n\n\`\`\`terraform\n${plan}\n\`\`\`\n\n</details>`,
+            });

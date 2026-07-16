@@ -9,7 +9,6 @@ dependencies {
     implementation(libs.postgresql)
     implementation(libs.flyway.core)
     implementation(libs.flyway.postgresql)
-    implementation(libs.minio)
     implementation(libs.jackson.databind)
     implementation(libs.spring.boot.starter.data.jpa)
     implementation(libs.micrometer.prometheus)

@@ -1,0 +1,118 @@
+# ---------------------------------------------------------------------------
+# PROD — notarial legal documents. Assume every default here is load-bearing.
+# ---------------------------------------------------------------------------
+
+project_id  = "notarist-prod-000000"
+environment = "prod"
+region      = "asia-southeast2" # Jakarta. Data residency for Indonesian notarial records.
+
+image = "asia-southeast2-docker.pkg.dev/notarist-prod-000000/notarist/notarist-backend:bootstrap"
+
+# ---- Cloud Run ----
+run_in_process_schedulers = true
+min_instances             = 2 # >1 so a single instance restart does not pause ingestion entirely.
+max_instances             = 10
+cpu                       = "2"
+memory                    = "4Gi"
+concurrency               = 40 # RAG requests are heavy; do not pile 80 onto one JVM.
+
+# Public API. The app enforces JWT auth itself — this is a deliberate decision, not a default.
+invoker_members = ["allUsers"]
+
+# Blocks `terraform destroy` from taking the product offline.
+deletion_protection = true
+
+# ---- Supabase ----
+postgres_url = "jdbc:postgresql://db.CHANGEME.supabase.co:6543/postgres?sslmode=require" # 6543 = transaction pooler.
+
+# MUST NOT be a superuser and MUST NOT hold BYPASSRLS. Both silently bypass the RLS tenant policies,
+# and the failure is invisible: everything works, and every tenant can see every other tenant.
+postgres_user = "notarist_app"
+
+# CONNECTION CEILING: max_instances(10) * postgres_pool_max(8) = 80 connections at full scale, plus
+# the separate ingest pool. Check this against the Supabase plan's limit BEFORE raising either number.
+postgres_pool_max = 8
+
+# ---- Qdrant ----
+qdrant_url        = "https://CHANGEME.cloud.qdrant.io:6333"
+qdrant_collection = "notarist_chunks"
+
+# ---- Storage ----
+# Bucket names share ONE global namespace across all of Google Cloud. Replace the 000000 suffix with
+# something project-specific (the project number works) or the apply fails on a name already taken.
+documents_bucket_name           = "notarist-prod-documents-000000"
+ocr_output_bucket_name          = "notarist-prod-ocr-output-000000"
+generated_documents_bucket_name = "notarist-prod-generated-documents-000000"
+application_assets_bucket_name  = "notarist-prod-application-assets-000000"
+
+bucket_location = "ASIA-SOUTHEAST2"
+
+# Never allow a destroy to take the notarial originals with it.
+bucket_force_destroy = false
+
+# 7-year WORM retention, matching the audit domain.
+#
+# retention_locked = true is IRREVERSIBLE. Once locked, NOBODY — not you, not a project owner, not
+# Google support — can shorten or remove it, and objects cannot be deleted before their retention
+# expires. That is exactly what compliance wants and exactly what makes it dangerous to set casually.
+# Leave it false, confirm the duration is right against actual legal advice, then flip it.
+document_retention_seconds = "220752000s" # 7 years
+document_retention_locked  = false        # ← flip to true only as a deliberate compliance step.
+
+cors_origins = ["https://app.notarist.example"]
+
+# ---- Images ----
+immutable_image_tags     = true  # A deployed tag becomes a permanent, auditable reference.
+artifact_cleanup_dry_run = false # Reviewed the dry-run logs; safe to actually delete.
+
+# ---- Secrets ----
+# Pin replication in-region for data residency.
+secret_replica_locations = ["asia-southeast2", "asia-southeast1"]
+
+# ---- Network ----
+enable_vpc_egress = true
+vpc_egress        = "ALL_TRAFFIC" # Required for Supabase/Qdrant (public endpoints) to see the static NAT IP.
+
+# ---- JWT ----
+jwt_access_ttl_seconds  = 900    # 15m
+jwt_refresh_ttl_seconds = 604800 # 7d
+
+# ---- Sidecars ----
+sidecar_urls = {
+  # OCR_BASE_URL       = "https://ocr-prod-xxxx.a.run.app"
+  # NER_BASE_URL       = "https://ner-prod-xxxx.a.run.app"
+  # RERANKER_BASE_URL  = "https://reranker-prod-xxxx.a.run.app"
+  # EMBEDDING_BASE_URL = "https://embedding-prod-xxxx.a.run.app"
+  # OLLAMA_BASE_URL    = "https://ollama-prod-xxxx.a.run.app"
+}
+
+# ---- Observability ----
+log_level                = "INFO"
+alert_email_addresses    = ["platform@notarist.example", "oncall@notarist.example"]
+enable_uptime_check      = true
+error_rate_threshold     = 0.2
+latency_p95_threshold_ms = 8000
+audit_log_bucket         = "notarist-audit-logs-000000"
+
+# ---- Custom domain ----
+# custom_domain = "api.notarist.example"
+
+# ---------------------------------------------------------------------------
+# Logging (Sprint TF2, Task 8)
+# ---------------------------------------------------------------------------
+log_retention_days         = 30    # 30 = Google's default AND the free-tier edge; beyond is billed per GiB
+create_audit_log_bucket    = true
+audit_log_retention_days   = 400   # 13 months. NOT a legal determination — see modules/logging/variables.tf
+audit_log_retention_locked = false # IRREVERSIBLE when true: blocks destroy for the full retention period
+exclude_health_check_logs  = true  # drops ~86k successful probes/month; FAILING probes still logged
+exclude_static_asset_logs  = true
+
+# ---------------------------------------------------------------------------
+# Budget (Sprint TF2, Task 9)
+# ---------------------------------------------------------------------------
+# Leave billing_account_id null to skip budget creation entirely (no resource, clean plan).
+# Requires roles/billing.costsManager ON THE BILLING ACCOUNT — the project deployer does NOT have it.
+# billing_account_id    = "01ABCD-2345EF-6789GH"
+# project_number        = "123456789012"   # NUMBER, not ID: gcloud projects describe <id> --format='value(projectNumber)'
+monthly_budget_amount = 100
+budget_currency_code  = "USD"             # must match the billing account's currency

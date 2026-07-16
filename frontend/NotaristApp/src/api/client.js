@@ -1,8 +1,12 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import { normalizeError, ErrorKind } from './errors';
+import { installRetry } from './retry';
+import { installLogger } from './logger';
+import { markOnline, markOffline, markReconnecting } from './connectivity';
 
 // Change this to your backend IP when running on a physical device
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:8080/api/v1';
+export const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:8080/api/v1';
 
 const client = axios.create({
   baseURL: BASE_URL,
@@ -82,6 +86,49 @@ client.interceptors.response.use(
 
     return Promise.reject(error);
   }
+);
+
+// ---------------------------------------------------------------------------------------------
+// Cross-cutting transport layers (Sprint 4, Tasks 1/2/8/9).
+//
+// Installed BELOW the auth interceptor above, and the order is load-bearing. Axios runs response
+// interceptors in registration order, so the session-refresh handler stays first and keeps owning
+// 401 recovery exactly as it did before this sprint — nothing here re-implements, wraps or races it.
+// A 401 that refresh cannot rescue falls through to normalization like any other error.
+//
+//   1. logger        — observes every attempt, including ones that get retried (dev only)
+//   2. connectivity  — updates the network signal from real outcomes
+//   3. retry         — GET-only replay; on retry the request re-enters this whole chain
+//   4. normalize     — LAST, so every error leaving this module is an ApiError
+// ---------------------------------------------------------------------------------------------
+
+installLogger(client);
+
+// Only network-class failures move the connectivity signal. An HTTP error proves the opposite of a
+// network problem: the server received the request and answered, so a 500 must not raise "offline".
+client.interceptors.response.use(
+  (response) => {
+    markOnline();
+    return response;
+  },
+  (error) => {
+    const kind = normalizeError(error).kind;
+    if (kind === ErrorKind.OFFLINE || kind === ErrorKind.UNREACHABLE || kind === ErrorKind.TIMEOUT) {
+      markOffline(kind);
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Retry sits after connectivity so a failed attempt registers as offline first, then flips to
+// "reconnecting" while the backoff is in flight — which is what the banner narrates to the user.
+installRetry(client, () => markReconnecting());
+
+// Terminal error handler: from here outward, every rejection is an ApiError with a `kind`, a
+// user-safe `message` and a developer `diagnostic`. Screens switch on `kind`, never on a raw status.
+client.interceptors.response.use(
+  (response) => response,
+  (error) => Promise.reject(normalizeError(error))
 );
 
 export default client;

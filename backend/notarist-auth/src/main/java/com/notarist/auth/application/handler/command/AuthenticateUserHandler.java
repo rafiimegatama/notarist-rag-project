@@ -49,8 +49,17 @@ public class AuthenticateUserHandler implements AuthenticateUserUseCase {
     @Override
     public TokenResponse execute(AuthenticateCommand command) {
         User user = userRepository.findByUsername(command.username())
-                .orElseThrow(() -> new UnauthorizedAccessException(
-                        "AUTH_INVALID_CREDENTIALS", "Invalid username or password"));
+                .orElse(null);
+
+        if (user == null) {
+            // An attempt against a username that does not exist is still a failed login, and it is
+            // the shape credential-stuffing takes. Auditing only the "user exists but password is
+            // wrong" case would leave the most common brute-force pattern with no trace at all.
+            // No actor/tenant can be attributed — audit_trail permits NULL for both.
+            publishUnknownUserLoginFailure(command);
+            throw new UnauthorizedAccessException(
+                    "AUTH_INVALID_CREDENTIALS", "Invalid username or password");
+        }
 
         if (!user.isActive()) {
             publishLoginFailure(command, user, "ACCOUNT_DISABLED");
@@ -90,6 +99,21 @@ public class AuthenticateUserHandler implements AuthenticateUserUseCase {
                 user.getRoles().stream().map(Enum::name).findFirst().orElse("UNKNOWN"),
                 user.getTenantId(), "LOGIN", "SUCCESS", cmd.ipAddress(),
                 cmd.correlationId().value(), Map.of("username", user.getUsername())
+        ));
+    }
+
+    /**
+     * Failed login against a username with no matching user. The attempted username is recorded as
+     * the subject (it is the only identifying detail available) while actor and tenant stay null —
+     * attributing an unauthenticated attempt to a user or tenant would be a fabrication.
+     */
+    private void publishUnknownUserLoginFailure(AuthenticateCommand cmd) {
+        eventPublisher.publishEvent(new AuditEventPayload(
+                "AUTH_LOGIN_FAILURE", "USER", cmd.username(),
+                null,
+                null,
+                null, "LOGIN", "FAILURE", cmd.ipAddress(),
+                cmd.correlationId().value(), Map.of("reason", "USER_NOT_FOUND")
         ));
     }
 

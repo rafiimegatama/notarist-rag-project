@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.AuthorizationManager;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -19,8 +20,17 @@ import org.springframework.security.web.util.matcher.IpAddressMatcher;
 
 import java.util.List;
 
+/**
+ * <h2>Method security is ON</h2>
+ *
+ * {@code @EnableMethodSecurity} makes {@code @PreAuthorize} actually evaluate. Without it those
+ * annotations are inert decoration — the JWT filter was already putting {@code ROLE_*} authorities
+ * into the {@code SecurityContext}, but nothing ever consulted them, so the platform's five roles
+ * (STAFF / NOTARIS / PPAT_OFFICER / PIMPINAN / ADMIN) existed on paper and enforced nothing.
+ */
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
@@ -53,6 +63,27 @@ public class SecurityConfig {
                 // out internal telemetry.
                 .requestMatchers("/actuator/prometheus", "/actuator/metrics", "/actuator/metrics/**")
                     .access(privateNetworkOnly())
+
+                // Operator probes: a Cloud Run / k8s / docker prober carries no JWT, and a health
+                // check that fails when auth fails is a health check that reports the wrong outage.
+                // These return "OK" / "READY" only — no tenant data.
+                .requestMatchers("/ops/health/live", "/ops/health/ready").permitAll()
+
+                // Everything else under /ops is ADMIN-ONLY.
+                //
+                // This surface performs DESTRUCTIVE, tenant-scoped operations — DLQ replay, queue
+                // replay, reindex — plus a full operational dashboard. It previously fell through to
+                // `anyRequest().authenticated()`, so any logged-in user, down to the lowest STAFF
+                // role, could invoke it; and because the endpoint took tenantId as a query
+                // parameter, they could aim it at ANY tenant, straight past the row-level-security
+                // isolation the rest of the system relies on.
+                //
+                // This is the second of two independent layers: OperationalHealthEndpoint also
+                // carries a class-level @PreAuthorize("hasRole('ADMIN')"). The URL rule alone is
+                // fragile (it stops protecting anything the moment a path changes); the annotation
+                // alone would be silently inert if method security were ever switched off. Keep both.
+                .requestMatchers("/ops/**").hasRole("ADMIN")
+
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

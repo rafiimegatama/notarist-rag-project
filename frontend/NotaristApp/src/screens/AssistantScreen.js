@@ -1,19 +1,19 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
-  Text,
   TextInput,
   FlatList,
-  StyleSheet,
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import { askAssistant, getConversationHistory } from '../api/assistant';
+import { useTheme } from '../context/ThemeContext';
+import useThemedStyles from '../hooks/useThemedStyles';
+import AppText from '../components/AppText';
 
 const SESSION_STORE_KEY = 'assistant_session_id';
 
@@ -38,27 +38,27 @@ function turnsToMessages(turns) {
   return messages;
 }
 
-function MessageBubble({ message }) {
+function MessageBubble({ message, styles }) {
   const isUser = message.role === 'user';
   return (
     <View style={[styles.bubbleRow, isUser && styles.bubbleRowUser]}>
-      {!isUser && <Text style={styles.avatar}>🤖</Text>}
+      {!isUser && <AppText style={styles.avatar}>🤖</AppText>}
       <View style={[styles.bubble, isUser ? styles.userBubble : styles.aiBubble]}>
-        <Text style={[styles.bubbleText, isUser && styles.userBubbleText]}>
+        <AppText style={[styles.bubbleText, isUser && styles.userBubbleText]}>
           {message.content}
-        </Text>
+        </AppText>
         {message.citations && message.citations.length > 0 && (
           <View style={styles.citations}>
-            <Text style={styles.citationLabel}>Sumber:</Text>
+            <AppText style={styles.citationLabel}>Sumber:</AppText>
             {message.citations.map((c, i) => (
-              <Text key={i} style={styles.citation}>
+              <AppText key={i} style={styles.citation}>
                 [{i + 1}] {c.sectionTitle || c.documentType || c.sourceObjectKey || c.documentId}
-              </Text>
+              </AppText>
             ))}
           </View>
         )}
         {message.confidence && (
-          <Text style={styles.confidence}>Kepercayaan: {message.confidence}</Text>
+          <AppText style={styles.confidence}>Kepercayaan: {message.confidence}</AppText>
         )}
       </View>
     </View>
@@ -66,6 +66,8 @@ function MessageBubble({ message }) {
 }
 
 export default function AssistantScreen() {
+  const theme = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
@@ -141,7 +143,7 @@ export default function AssistantScreen() {
         ref={flatListRef}
         data={messages}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <MessageBubble message={item} />}
+        renderItem={({ item }) => <MessageBubble message={item} styles={styles} />}
         contentContainerStyle={styles.messageList}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
       />
@@ -154,7 +156,7 @@ export default function AssistantScreen() {
               style={styles.suggestionChip}
               onPress={() => { setInput(q); }}
             >
-              <Text style={styles.suggestionText}>{q}</Text>
+              <AppText style={styles.suggestionText}>{q}</AppText>
             </TouchableOpacity>
           ))}
         </View>
@@ -164,7 +166,7 @@ export default function AssistantScreen() {
         <TextInput
           style={styles.input}
           placeholder="Tanyakan sesuatu tentang dokumen notaris..."
-          placeholderTextColor="#475569"
+          placeholderTextColor={theme.colors.textFaint}
           value={input}
           onChangeText={setInput}
           multiline
@@ -178,9 +180,9 @@ export default function AssistantScreen() {
           disabled={!input.trim() || loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" size="small" />
+            <ActivityIndicator color={theme.colors.primaryText} size="small" />
           ) : (
-            <Text style={styles.sendIcon}>↑</Text>
+            <AppText style={styles.sendIcon}>↑</AppText>
           )}
         </TouchableOpacity>
       </View>
@@ -188,91 +190,96 @@ export default function AssistantScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A' },
-  messageList: { padding: 16, paddingBottom: 8 },
+const makeStyles = (theme) => ({
+  container: { flex: 1, backgroundColor: theme.colors.background },
+  messageList: { padding: theme.spacing.lg, paddingBottom: theme.spacing.sm },
   bubbleRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: theme.spacing.lg,
   },
   bubbleRowUser: {
     justifyContent: 'flex-end',
   },
-  avatar: { fontSize: 20, marginRight: 8, marginTop: 4 },
+  avatar: { fontSize: 20, marginRight: theme.spacing.sm, marginTop: theme.spacing.xs },
   bubble: {
     maxWidth: '80%',
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: theme.radius.lg,
+    padding: theme.spacing.md,
   },
   aiBubble: {
-    backgroundColor: '#1E293B',
+    backgroundColor: theme.colors.surface,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: theme.colors.border,
   },
   userBubble: {
-    backgroundColor: '#2563EB',
+    backgroundColor: theme.colors.primary,
   },
   bubbleText: {
-    color: '#CBD5E1',
+    color: theme.colors.text,
     fontSize: 14,
     lineHeight: 21,
   },
-  userBubbleText: { color: '#fff' },
+  userBubbleText: { color: theme.colors.primaryText },
   citations: {
-    marginTop: 8,
-    paddingTop: 8,
+    marginTop: theme.spacing.sm,
+    paddingTop: theme.spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: theme.colors.border,
   },
-  citationLabel: { color: '#94A3B8', fontSize: 11, fontWeight: '600', marginBottom: 2 },
-  citation: { color: '#60A5FA', fontSize: 11 },
-  confidence: { color: '#64748B', fontSize: 11, marginTop: 6 },
+  citationLabel: {
+    color: theme.colors.textMuted,
+    fontSize: theme.typography.micro,
+    fontWeight: theme.typography.semibold,
+    marginBottom: 2,
+  },
+  citation: { color: theme.colors.primary, fontSize: theme.typography.micro },
+  confidence: { color: theme.colors.textFaint, fontSize: theme.typography.micro, marginTop: 6 },
   suggestions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    gap: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.sm,
   },
   suggestionChip: {
-    backgroundColor: '#1E293B',
-    borderRadius: 16,
-    paddingHorizontal: 12,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.pill,
+    paddingHorizontal: theme.spacing.md,
     paddingVertical: 6,
     borderWidth: 1,
-    borderColor: '#3B82F6',
+    borderColor: theme.colors.primary,
   },
-  suggestionText: { color: '#60A5FA', fontSize: 12 },
+  suggestionText: { color: theme.colors.primary, fontSize: theme.typography.caption },
   inputRow: {
     flexDirection: 'row',
-    padding: 12,
-    gap: 8,
+    padding: theme.spacing.md,
+    gap: theme.spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: '#1E293B',
-    backgroundColor: '#0F172A',
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.background,
   },
   input: {
     flex: 1,
-    backgroundColor: '#1E293B',
-    color: '#F1F5F9',
-    borderRadius: 20,
-    paddingHorizontal: 16,
+    backgroundColor: theme.colors.surface,
+    color: theme.colors.text,
+    borderRadius: theme.radius.xl,
+    paddingHorizontal: theme.spacing.lg,
     paddingVertical: 10,
     fontSize: 14,
     maxHeight: 100,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: theme.colors.border,
   },
   sendBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#3B82F6',
+    backgroundColor: theme.colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     alignSelf: 'flex-end',
   },
   sendBtnDisabled: { opacity: 0.4 },
-  sendIcon: { color: '#fff', fontSize: 20, fontWeight: '700' },
+  sendIcon: { color: theme.colors.primaryText, fontSize: 20, fontWeight: theme.typography.bold },
 });

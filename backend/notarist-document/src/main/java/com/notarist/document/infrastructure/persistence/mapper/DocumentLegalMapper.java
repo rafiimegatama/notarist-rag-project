@@ -4,7 +4,7 @@ import com.notarist.core.domain.valueobject.*;
 import com.notarist.document.api.response.DocumentLegalResponse;
 import com.notarist.document.domain.model.DocumentLegal;
 import com.notarist.document.domain.model.DocumentStatus;
-import com.notarist.document.infrastructure.persistence.oracle.DocumentLegalJpaEntity;
+import com.notarist.document.infrastructure.persistence.postgres.DocumentLegalJpaEntity;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;

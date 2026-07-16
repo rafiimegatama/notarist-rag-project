@@ -17,7 +17,7 @@ public record IndexingCompletedEvent(
     UUID documentId,
     int vectorsIndexed,
     boolean postgresBm25Updated,
-    boolean oracleStatusUpdated,
+    boolean documentStatusUpdated,
     long processingDurationMs
 ) implements DomainEvent {
 

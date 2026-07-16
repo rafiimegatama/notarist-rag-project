@@ -4,11 +4,15 @@ import com.notarist.runtime.degradation.RuntimeDegradationManager;
 import com.notarist.runtime.metrics.RuntimeMetricsRegistry;
 import com.notarist.runtime.model.ModelProvider;
 import com.notarist.runtime.model.ModelRegistry;
+import com.notarist.runtime.provider.ProviderCapabilities;
+import com.notarist.runtime.provider.RerankerProvider;
+import com.notarist.runtime.provider.RuntimeProviderHealth;
 import com.notarist.runtime.timeout.TimeoutCancellationOrchestrator;
 import com.notarist.search.application.port.out.RerankerPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -18,8 +22,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Real cross-encoder HTTP adapter for reranking.
- * Implements RerankerPort from notarist-search.
+ * Real cross-encoder HTTP adapter for reranking — the {@code crossencoder}
+ * {@link RerankerProvider} behind the RerankerRegistry (select with RERANK_PROVIDER=crossencoder).
  *
  * Endpoint: POST /rerank
  * Request:  {"query": "...", "passages": ["...", "..."], "top_k": N}
@@ -31,9 +35,10 @@ import java.util.Map;
  * CallerRunsPolicy applies backpressure to the calling thread.
  */
 @Component
-public class RerankerRuntimeWorker implements RerankerPort {
+public class RerankerRuntimeWorker implements RerankerProvider {
 
     private static final Logger log = LoggerFactory.getLogger(RerankerRuntimeWorker.class);
+    private static final String PROVIDER_ID         = "crossencoder";
     private static final long   RERANK_TIMEOUT_MS   = 15_000L;
     private static final float  DEGRADED_SCORE      = 0.5f;
     private static final int    DEFAULT_TOP_K       = 5;
@@ -46,6 +51,7 @@ public class RerankerRuntimeWorker implements RerankerPort {
     private final RuntimeDegradationManager       degradation;
     private final TimeoutCancellationOrchestrator timeout;
     private final RerankerQueueIsolation          queue;
+    private final String                          configuredModel;
 
     public RerankerRuntimeWorker(
             @Qualifier("aiRuntimeRestTemplate") RestTemplate restTemplate,
@@ -53,13 +59,49 @@ public class RerankerRuntimeWorker implements RerankerPort {
             RuntimeMetricsRegistry metrics,
             RuntimeDegradationManager degradation,
             TimeoutCancellationOrchestrator timeout,
-            RerankerQueueIsolation queue) {
+            RerankerQueueIsolation queue,
+            @Value("${notarist.runtime.reranker.model:}") String configuredModel) {
         this.restTemplate  = restTemplate;
         this.modelRegistry = modelRegistry;
         this.metrics       = metrics;
         this.degradation   = degradation;
         this.timeout       = timeout;
         this.queue         = queue;
+        this.configuredModel = configuredModel == null ? "" : configuredModel.trim();
+    }
+
+    @Override
+    public String id() {
+        return PROVIDER_ID;
+    }
+
+    @Override
+    public String activeModel() {
+        return configuredModel.isBlank() ? modelRegistry.getReranker().modelName() : configuredModel;
+    }
+
+    @Override
+    public ProviderCapabilities capabilities() {
+        return ProviderCapabilities.builder()
+                .reranking(true)
+                .batch(true, 64)
+                .build();
+    }
+
+    @Override
+    public RuntimeProviderHealth health() {
+        String model = activeModel();
+        String endpoint = modelRegistry.getReranker().endpointUrl();
+        if (degradation.isDegraded(RuntimeDegradationManager.AiRuntime.RERANKER)) {
+            return RuntimeProviderHealth.down(PROVIDER_ID, model, "RERANKER runtime marked degraded");
+        }
+        return RuntimeProviderHealth.up(PROVIDER_ID, model, "cross-encoder at " + endpoint,
+                java.util.Map.of("endpoint", endpoint));
+    }
+
+    @Override
+    public boolean isAvailable() {
+        return !degradation.isDegraded(RuntimeDegradationManager.AiRuntime.RERANKER);
     }
 
     @Override

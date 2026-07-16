@@ -74,3 +74,10 @@ export async function logout() {
 export async function getStoredToken() {
   return SecureStore.getItemAsync('jwt_token');
 }
+
+// Read-only accessor for display purposes. The session id is returned by /auth/login but is NOT a
+// JWT claim, so after an app relaunch (session restored from the token alone) it is only available
+// from storage. Profile reads it through here instead of showing an empty field.
+export async function getStoredSessionId() {
+  return SecureStore.getItemAsync('session_id');
+}

@@ -39,7 +39,7 @@ public final class PipelineStateMachine {
     /**
      * Returns the PENDING stage to enqueue once a job has transitioned to {@code newStatus}.
      *
-     * <p>There is no EMBED_COMPLETED status — the enum (and the Oracle check constraint on
+     * <p>There is no EMBED_COMPLETED status — the enum (and the PostgreSQL check constraint on
      * INGESTION_JOB.PIPELINE_STATUS) collapses it into INDEX_PENDING, so a job that finished
      * embedding already carries the next pending stage as its own status. That case must still
      * enqueue INDEX work; it is the one status that maps to itself.

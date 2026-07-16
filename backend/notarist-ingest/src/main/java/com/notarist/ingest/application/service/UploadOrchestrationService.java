@@ -72,7 +72,7 @@ public class UploadOrchestrationService implements InitiateIngestionUseCase {
         );
 
         DocumentStoragePort.SignedUploadUrl signedUrl = storagePort.generateUploadUrl(
-                documentId, jobId,
+                command.tenantId(), documentId, jobId,
                 command.originalFilename(),
                 Duration.ofSeconds(signedUrlTtlSeconds));
 

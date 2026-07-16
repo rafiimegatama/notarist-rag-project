@@ -7,7 +7,7 @@ package com.notarist.infra.resilience;
  * Changing them requires corresponding updates to SLA documentation.
  *
  * Rationale:
- *   MinIO write 120s  — large PDF uploads (up to ~200MB)
+ *   GCS write 120s    — large PDF uploads (up to ~200MB)
  *   Qdrant search 5s  — interactive search must feel fast; fallback to BM25 beyond this
  *   Qdrant upsert 10s — batch index writes, less latency-sensitive than reads
  *   Postgres query 30s — complex BM25 queries on large chunk_index tables
@@ -16,10 +16,10 @@ public final class IntegrationTimeouts {
 
     private IntegrationTimeouts() {}
 
-    // MinIO
-    public static final int MINIO_CONNECT_MS = 5_000;
-    public static final int MINIO_READ_MS    = 30_000;
-    public static final int MINIO_WRITE_MS   = 120_000;
+    // Google Cloud Storage
+    public static final int GCS_CONNECT_MS = 5_000;
+    public static final int GCS_READ_MS    = 30_000;
+    public static final int GCS_WRITE_MS   = 120_000;
 
     // Qdrant
     public static final int QDRANT_CONNECT_MS = 3_000;

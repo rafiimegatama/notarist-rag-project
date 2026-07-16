@@ -1,0 +1,239 @@
+# =============================================================================
+# Notarist — build, push, and (optionally) deploy.
+#
+# ---------------------------------------------------------------------------
+# THE DEPLOY JOB IS DISABLED BY DEFAULT. Two independent switches must both be on:
+#
+#   1. vars.ENABLE_CLOUD_RUN_DEPLOY == 'true'   (repository variable)
+#   2. terraform: github_actions_can_deploy = true
+#
+# (1) without (2) means the job runs and fails on permissions — the GitHub Actions service account
+# does not hold roles/run.developer until Terraform grants it. That is the intended design rather
+# than an oversight: the switch that decides whether CI *may* deploy is an infrastructure decision
+# reviewed as Terraform, not a repository setting one person can flip. Flipping (1) alone cannot
+# escalate anything.
+#
+# ---------------------------------------------------------------------------
+# Relationship to cloudbuild/cloudbuild.yaml
+#
+# Both pipelines exist. Cloud Build remains the path that holds terraform apply authority; this
+# workflow builds, tests, publishes, and can ship an image when explicitly enabled. Two pipelines
+# that can both deploy WILL eventually disagree about what is running — so if this becomes the real
+# deploy path, retire the Cloud Build trigger rather than leaving both armed.
+# See docs/infrastructure/05-ci-cd.md.
+# =============================================================================
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        type: choice
+        options: [dev, staging, prod]
+        default: dev
+        required: true
+
+concurrency:
+  # Never let two deploys to the same environment race. Do NOT cancel in progress: interrupting a
+  # half-finished rollout is worse than waiting for it.
+  group: deploy-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  ENVIRONMENT: ${{ inputs.environment || 'dev' }}
+  REGION: ${{ vars.GCP_REGION || 'asia-southeast2' }}
+  REPOSITORY: ${{ vars.AR_REPOSITORY || 'notarist' }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Build and TEST before anything is published.
+  #
+  # The Dockerfile builds with `-x test` on purpose (a container build is the wrong place to discover
+  # a failing test), so the real Gradle build runs here. An image in the registry therefore always
+  # corresponds to a commit whose tests passed. Same ordering as cloudbuild.yaml — deliberately, so
+  # the two pipelines cannot disagree about what "green" means.
+  # ---------------------------------------------------------------------------
+  build:
+    name: gradle build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: build and test
+        working-directory: backend
+        run: ./gradlew clean build --no-daemon
+
+  # ---------------------------------------------------------------------------
+  # 2. Build the image and push it to Artifact Registry.
+  # ---------------------------------------------------------------------------
+  push:
+    name: docker build + push
+    needs: build
+    if: vars.GHA_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GHA_WIF_PROVIDER }}
+          service_account: ${{ vars.GHA_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # Docker needs credentials for the AR host specifically. The token comes from the WIF exchange
+      # above; nothing long-lived is stored.
+      - name: configure docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - id: meta
+        run: |
+          PROJECT="${{ vars[format('GCP_PROJECT_ID_{0}', env.ENVIRONMENT)] }}"
+          BASE="${{ env.REGION }}-docker.pkg.dev/${PROJECT}/${{ env.REPOSITORY }}/notarist-backend"
+          echo "base=${BASE}" >> "$GITHUB_OUTPUT"
+          echo "image=${BASE}:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Tagged with BOTH the commit sha (immutable — this is what gets deployed and what a rollback
+      # names) and the environment (a moving pointer used only as a build cache source).
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.base }}:${{ github.sha }}
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.base }}:${{ env.ENVIRONMENT }}
+          cache-from: type=registry,ref=${{ steps.meta.outputs.base }}:${{ env.ENVIRONMENT }}
+          cache-to: type=inline
+
+  # ---------------------------------------------------------------------------
+  # 3. Every secret the service mounts must HAVE a version.
+  #
+  # Terraform creates secret containers; a human writes the values. A revision referencing a secret
+  # with zero versions fails to start, and the error points at the revision rather than the empty
+  # secret. Checking here turns a confusing rollout failure into a clear message.
+  #
+  # This list is the set the cloudrun module actually mounts. openrouter-api-key and gemini-api-key
+  # are intentionally absent: they exist as containers but are not wired into the service yet, so
+  # requiring values would block deploys for a feature that is not consuming them.
+  # ---------------------------------------------------------------------------
+  verify-secrets:
+    name: verify secrets have values
+    needs: push
+    if: vars.ENABLE_CLOUD_RUN_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GHA_WIF_PROVIDER }}
+          service_account: ${{ vars.GHA_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: check for empty secrets
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars[format('GCP_PROJECT_ID_{0}', env.ENVIRONMENT)] }}"
+          PREFIX="notarist-${{ env.ENVIRONMENT }}"
+          MISSING=0
+
+          for s in postgres-password app-encryption-key app-encryption-salt qdrant-api-key jwt-private-key jwt-public-key; do
+            SECRET="${PREFIX}-${s}"
+            COUNT=$(gcloud secrets versions list "${SECRET}" \
+                      --filter="state=enabled" --format="value(name)" \
+                      --project="${PROJECT}" 2>/dev/null | wc -l || echo 0)
+            if [ "${COUNT}" -eq 0 ]; then
+              echo "::error::${SECRET} exists but has no enabled version."
+              MISSING=1
+            else
+              echo "ok: ${SECRET}"
+            fi
+          done
+
+          if [ "${MISSING}" -eq 1 ]; then
+            echo "Populate with: printf '%s' '<value>' | gcloud secrets versions add <secret> --data-file=- --project=${PROJECT}"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # 4. Deploy — DISABLED BY DEFAULT. See the header.
+  #
+  # Only the IMAGE is set here. Everything else about the service (env vars, secrets, scaling, volume
+  # mounts) is owned by Terraform, and the cloudrun module ignore_changes the image — so the two
+  # never fight over the same field.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: deploy to Cloud Run
+    needs: [push, verify-secrets]
+    if: vars.ENABLE_CLOUD_RUN_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    # Attach a GitHub Environment so prod can require a human approval before this job starts.
+    environment: ${{ inputs.environment || 'dev' }}
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GHA_WIF_PROVIDER }}
+          service_account: ${{ vars.GHA_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: deploy
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars[format('GCP_PROJECT_ID_{0}', env.ENVIRONMENT)] }}"
+          SERVICE="notarist-${{ env.ENVIRONMENT }}-api"
+
+          gcloud run deploy "${SERVICE}" \
+            --image="${{ needs.push.outputs.image }}" \
+            --region="${{ env.REGION }}" \
+            --project="${PROJECT}" \
+            --quiet
+
+      # A deploy that reports success but serves 503 is not a success.
+      - name: smoke test
+        run: |
+          set -euo pipefail
+          PROJECT="${{ vars[format('GCP_PROJECT_ID_{0}', env.ENVIRONMENT)] }}"
+          SERVICE="notarist-${{ env.ENVIRONMENT }}-api"
+          URL=$(gcloud run services describe "${SERVICE}" \
+                  --region="${{ env.REGION }}" --project="${PROJECT}" \
+                  --format="value(status.url)")
+
+          echo "Probing ${URL}/actuator/health"
+          for i in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/actuator/health" || echo 000)
+            if [ "${CODE}" = "200" ]; then
+              echo "Healthy after ${i} attempt(s)."
+              exit 0
+            fi
+            echo "  attempt ${i}: HTTP ${CODE}"
+            sleep 10
+          done
+
+          echo "::error::Service did not become healthy. Recent logs:"
+          gcloud run services logs read "${SERVICE}" \
+            --region="${{ env.REGION }}" --project="${PROJECT}" --limit=50 || true
+          exit 1

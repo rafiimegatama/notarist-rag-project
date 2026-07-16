@@ -4,8 +4,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Thread-local holder for Oracle VPD security context.
- * Set by JwtAuthenticationFilter; read by Oracle repository implementations.
+ * Thread-local holder for the caller's tenant-isolation context.
+ * Set by JwtAuthenticationFilter; read by the repository implementations, which push it into
+ * PostgreSQL as transaction-local settings that the row-level-security policies read back
+ * (see RlsContextApplier and Flyway V9). The "Vpd" name is a holdover from the Oracle VPD
+ * implementation this replaced; the contract is unchanged.
  * Must be cleared in filter finally-block to prevent leaking across requests.
  */
 public final class VpdContextHolder {

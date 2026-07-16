@@ -47,11 +47,16 @@ public class GetDocumentQueryHandler implements GetDocumentUseCase {
                         "Document not found: " + query.documentId().value()));
 
         if (!tenantMatches(document, query)) {
+            // Audited as a denial, then reported as NOT_FOUND: the caller must not learn that the
+            // document exists in another tenant, but the attempt must still leave a trace.
+            auditPublisher.publishAccessDenied(
+                    query.documentId(), query.actorUserId(), query.actorRole(),
+                    query.tenantId(), "CROSS_TENANT_ACCESS", query.correlationId());
             throw new DocumentNotFoundException(
                     "DOCUMENT_NOT_FOUND", "Document not found: " + query.documentId().value());
         }
 
-        assertClearanceAllowed(query.actorRole(), document.getClassificationLevel());
+        assertClearanceAllowed(query, document.getClassificationLevel());
 
         auditPublisher.publishDocumentAccess(
                 query.documentId(), query.actorUserId(), query.actorRole(),
@@ -64,9 +69,13 @@ public class GetDocumentQueryHandler implements GetDocumentUseCase {
         return document.getTenantId().equals(query.tenantId());
     }
 
-    private void assertClearanceAllowed(String actorRole, ClassificationLevel docLevel) {
+    private void assertClearanceAllowed(GetDocumentQuery query, ClassificationLevel docLevel) {
+        String actorRole = query.actorRole();
         ClassificationLevel callerClearance = resolveClearance(actorRole);
         if (docLevel.exceeds(callerClearance)) {
+            auditPublisher.publishAccessDenied(
+                    query.documentId(), query.actorUserId(), actorRole,
+                    query.tenantId(), "INSUFFICIENT_CLEARANCE", query.correlationId());
             throw new UnauthorizedAccessException(
                     "DOCUMENT_INSUFFICIENT_CLEARANCE",
                     "Caller role " + actorRole + " does not have clearance for " + docLevel + " document");

@@ -1,0 +1,89 @@
+# ---------------------------------------------------------------------------
+# STAGING — production-shaped, production-hardened, smaller.
+#
+# The point of staging is to fail the same way prod would. So the settings that CHANGE BEHAVIOUR
+# (RLS, retention, immutable tags, VPC egress) match prod; only the settings that change COST
+# (instance counts, sizes) are smaller.
+# ---------------------------------------------------------------------------
+
+project_id  = "notarist-staging-000000"
+environment = "staging"
+region      = "asia-southeast2"
+
+image = "asia-southeast2-docker.pkg.dev/notarist-staging-000000/notarist/notarist-backend:bootstrap"
+
+# ---- Cloud Run ----
+run_in_process_schedulers = true
+max_instances             = 4
+cpu                       = "1"
+memory                    = "2Gi"
+concurrency               = 60
+
+invoker_members = ["allUsers"]
+
+# ---- Supabase ----
+postgres_url      = "jdbc:postgresql://db.CHANGEME.supabase.co:5432/postgres?sslmode=require"
+postgres_user     = "notarist_app"
+postgres_pool_max = 8 # 4 instances * 8 = 32 connections at peak.
+
+# ---- Qdrant ----
+qdrant_url        = "https://CHANGEME.cloud.qdrant.io:6333"
+qdrant_collection = "notarist_chunks"
+
+# ---- Storage ----
+# Bucket names share ONE global namespace across all of Google Cloud. Replace the 000000 suffix with
+# something project-specific (the project number works) or the apply fails on a name already taken.
+documents_bucket_name           = "notarist-staging-documents-000000"
+ocr_output_bucket_name          = "notarist-staging-ocr-output-000000"
+generated_documents_bucket_name = "notarist-staging-generated-documents-000000"
+application_assets_bucket_name  = "notarist-staging-application-assets-000000"
+
+bucket_location      = "ASIA-SOUTHEAST2"
+bucket_force_destroy = false
+cors_origins          = ["https://staging.notarist.example"]
+
+# Exercise retention here, but do NOT lock it — locking is irreversible and staging data is
+# disposable. Locking belongs to prod, as a deliberate compliance step.
+document_retention_seconds = "2592000s" # 30 days
+document_retention_locked  = false
+
+# ---- Images ----
+# Match prod: a staging deploy that can silently re-point a tag does not rehearse prod's constraints.
+immutable_image_tags     = true
+artifact_cleanup_dry_run = true
+
+# ---- Network ----
+# On, so the Supabase/Qdrant allowlist path is actually rehearsed before prod depends on it.
+enable_vpc_egress = true
+vpc_egress        = "ALL_TRAFFIC" # Supabase and Qdrant are PUBLIC endpoints — private ranges won't reach them.
+
+# ---- Sidecars ----
+sidecar_urls = {
+  # OCR_BASE_URL       = "https://ocr-staging-xxxx.a.run.app"
+  # NER_BASE_URL       = "https://ner-staging-xxxx.a.run.app"
+  # RERANKER_BASE_URL  = "https://reranker-staging-xxxx.a.run.app"
+  # EMBEDDING_BASE_URL = "https://embedding-staging-xxxx.a.run.app"
+  # OLLAMA_BASE_URL    = "https://ollama-staging-xxxx.a.run.app"
+}
+
+# ---- Observability ----
+log_level                = "INFO"
+alert_email_addresses    = ["platform@notarist.example"]
+enable_uptime_check      = true
+latency_p95_threshold_ms = 8000
+audit_log_bucket         = "notarist-audit-logs-000000"
+
+# ---------------------------------------------------------------------------
+# Logging (Sprint TF2, Task 8)
+# ---------------------------------------------------------------------------
+# Non-prod: keep the free 30-day default and skip the audit bucket. The audit trail that matters
+# for compliance is prod's; paying to retain dev's for 13 months buys nothing.
+log_retention_days      = 30
+create_audit_log_bucket = false
+
+# ---------------------------------------------------------------------------
+# Budget (Sprint TF2, Task 9)
+# ---------------------------------------------------------------------------
+# billing_account_id  = "01ABCD-2345EF-6789GH"
+# project_number      = "123456789012"
+monthly_budget_amount = 25

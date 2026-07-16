@@ -3,13 +3,18 @@ package com.notarist.assistant.application.orchestrator;
 import com.notarist.assistant.api.response.AssistantResponse;
 import com.notarist.assistant.api.response.CitationDto;
 import com.notarist.assistant.application.command.AssistantCommand;
-import com.notarist.assistant.application.pipeline.*;
+import com.notarist.assistant.application.pipeline.CitationInjector;
+import com.notarist.assistant.application.pipeline.ConversationMemoryService;
+import com.notarist.assistant.application.pipeline.FollowUpSuggestionService;
 import com.notarist.assistant.application.port.in.AssistantUseCase;
 import com.notarist.assistant.application.port.out.AssistantAuditPort;
-import com.notarist.assistant.application.port.out.LlmPort;
-import com.notarist.assistant.application.port.out.SearchPort;
 import com.notarist.assistant.domain.model.*;
 import com.notarist.assistant.infrastructure.metrics.AssistantMetricsRegistry;
+import com.notarist.core.domain.valueobject.CorrelationId;
+import com.notarist.search.application.routing.AnswerCitation;
+import com.notarist.search.application.routing.AnswerRequest;
+import com.notarist.search.application.routing.AnswerResult;
+import com.notarist.search.application.routing.AnswerRouter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -21,61 +26,48 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Orchestrates the full assistant pipeline.
- * NOT a mega service — each responsibility is delegated to its dedicated component.
+ * The assistant's entry point. It asks the {@link AnswerRouter} for an answer and renders it.
  *
- * Flow (mandatory, no shortcuts):
- *   Command → Search → Budget → Citations (BEFORE LLM) → Grounding Eval
- *   → [short-circuit if INSUFFICIENT+STRICT] → Context Assembly → Prompt Build
- *   → LLM Invoke → Unsupported Claim Detection → Hallucination Guard
- *   → Follow-ups → Memory Store → Audit → Metrics → Response
+ * <p><b>What changed and why.</b> This class used to <em>be</em> the RAG pipeline: it held
+ * {@code LlmPort} and {@code SearchPort} and ran retrieve → prompt → generate for every question that
+ * arrived, including "berapa akta bulan ini". That made the language model the default execution
+ * engine for the whole product — a model answering questions that have exact answers sitting in a
+ * database. In a notary office an invented deed count or legal status is a liability, not a bug.
+ *
+ * <p>Now it depends on exactly one collaborator for answering: the router. It cannot see SQL, BM25,
+ * the vector index or an LLM, and it has no way to choose between them. The routing decision belongs
+ * to the router and is policed by {@code FactualQueryGuard}; this class renders whatever comes back.
+ * The RAG pipeline still exists — behind {@code RagPort}, reachable only by strategies permitted to
+ * use it. ArchUnit enforces this separation rather than leaving it to discipline.
+ *
+ * <p>Everything downstream of the answer — citations, confidence sections, memory, audit, metrics and
+ * the response DTO — is unchanged, so the shipped mobile client sees an identical contract.
  */
 @Service
 public class AssistantOrchestrator implements AssistantUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(AssistantOrchestrator.class);
 
-    private final SearchPort                   searchPort;
-    private final AssistantContextBudgetManager contextBudgetManager;
-    private final CitationInjector             citationInjector;
-    private final GroundingEvaluator           groundingEvaluator;
-    private final RetrievalContextAssembler    contextAssembler;
-    private final PromptBuilder                promptBuilder;
-    private final LlmPort                      llmPort;
-    private final UnsupportedClaimDetector     claimDetector;
-    private final HallucinationGuard           hallucinationGuard;
-    private final FollowUpSuggestionService    followUpService;
-    private final ConversationMemoryService    memoryService;
-    private final AssistantAuditPort           auditPort;
-    private final AssistantMetricsRegistry     metrics;
+    private final AnswerRouter              answerRouter;
+    private final CitationInjector          citationInjector;
+    private final FollowUpSuggestionService followUpService;
+    private final ConversationMemoryService memoryService;
+    private final AssistantAuditPort        auditPort;
+    private final AssistantMetricsRegistry  metrics;
 
     public AssistantOrchestrator(
-            SearchPort searchPort,
-            AssistantContextBudgetManager contextBudgetManager,
+            AnswerRouter answerRouter,
             CitationInjector citationInjector,
-            GroundingEvaluator groundingEvaluator,
-            RetrievalContextAssembler contextAssembler,
-            PromptBuilder promptBuilder,
-            LlmPort llmPort,
-            UnsupportedClaimDetector claimDetector,
-            HallucinationGuard hallucinationGuard,
             FollowUpSuggestionService followUpService,
             ConversationMemoryService memoryService,
             AssistantAuditPort auditPort,
             AssistantMetricsRegistry metrics) {
-        this.searchPort          = searchPort;
-        this.contextBudgetManager = contextBudgetManager;
-        this.citationInjector    = citationInjector;
-        this.groundingEvaluator  = groundingEvaluator;
-        this.contextAssembler    = contextAssembler;
-        this.promptBuilder       = promptBuilder;
-        this.llmPort             = llmPort;
-        this.claimDetector       = claimDetector;
-        this.hallucinationGuard  = hallucinationGuard;
-        this.followUpService     = followUpService;
-        this.memoryService       = memoryService;
-        this.auditPort           = auditPort;
-        this.metrics             = metrics;
+        this.answerRouter     = answerRouter;
+        this.citationInjector = citationInjector;
+        this.followUpService  = followUpService;
+        this.memoryService    = memoryService;
+        this.auditPort        = auditPort;
+        this.metrics          = metrics;
     }
 
     @Override
@@ -83,11 +75,6 @@ public class AssistantOrchestrator implements AssistantUseCase {
         return execute(command, null);
     }
 
-    /**
-     * Token-level streaming variant. Identical pipeline to {@link #ask} — same citation-first
-     * ordering, same grounding short-circuit, same post-LLM guard — except step 8 uses
-     * {@link LlmPort#stream} and pushes every token to the sink as it arrives.
-     */
     @Override
     public AssistantResponse askStreaming(AssistantCommand command, StreamSink sink) {
         return execute(command, Objects.requireNonNull(sink, "sink"));
@@ -95,10 +82,9 @@ public class AssistantOrchestrator implements AssistantUseCase {
 
     @Override
     public boolean cancelStream(String traceId) {
-        return llmPort.cancelStream(traceId);
+        return answerRouter.cancelStream(traceId);
     }
 
-    /** @param sink null → blocking LLM invocation; non-null → token-level streaming. */
     private AssistantResponse execute(AssistantCommand command, StreamSink sink) {
         long startMs = System.currentTimeMillis();
         UUID retrievalSnapshotId = UUID.randomUUID();
@@ -111,101 +97,48 @@ public class AssistantOrchestrator implements AssistantUseCase {
         MDC.put("tenantId", command.tenantId().toString());
 
         if (sink != null) {
-            // Open the cancellable scope BEFORE retrieval: a client that disconnects while the
-            // request is still queued behind the single inference thread must not leave a doomed
-            // inference to run to completion.
-            llmPort.openStream(traceIdStr);
+            // Opened before routing: a client that disconnects while the request is still queued
+            // behind the single inference thread must not leave a doomed inference running.
+            answerRouter.openStream(traceIdStr);
             sink.onStart(traceIdStr);
         }
 
         try {
             metrics.recordInteractionStarted(command.safetyMode());
-            log.info("Assistant ask traceId={} tenantId={} safetyMode={} query='{}'",
-                    trace.traceId(), command.tenantId(), command.safetyMode(), command.rawQuery());
+            log.info("Assistant ask traceId={} tenantId={} query='{}'",
+                    trace.traceId(), command.tenantId(), command.rawQuery());
 
-            // 1. Retrieval
-            SearchPort.SearchResult searchResult = searchPort.search(toSearchRequest(command, retrievalSnapshotId));
-            log.debug("Retrieval: {} chunks, confidence={}, score={}",
-                    searchResult.chunks().size(), searchResult.groundingConfidence(), searchResult.groundingScore());
+            AnswerRequest request = toAnswerRequest(command, traceIdStr, retrievalSnapshotId);
 
-            // 2. Context budget management: dedup + prioritize + truncate
-            AssistantContextBudgetManager.BudgetResult budget =
-                    contextBudgetManager.applyBudget(searchResult.chunks(), command.contextTokenBudget());
+            AnswerResult result = (sink != null)
+                    ? answerRouter.routeStreaming(request, sink::onToken)
+                    : answerRouter.route(request);
 
-            // 3. Citations BEFORE LLM — mandatory
-            List<CitationDto> citations = citationInjector.buildCitations(budget.selectedChunks());
-
-            // 4. Grounding evaluation BEFORE LLM
-            AnswerConfidence preLlmConfidence = groundingEvaluator.evaluate(
-                    searchResult.groundingScore(), budget.selectedChunks().size(), command.safetyMode());
-            log.debug("Pre-LLM confidence={}", preLlmConfidence);
-
-            // 5. Short-circuit: INSUFFICIENT + STRICT → no LLM call
-            if (preLlmConfidence == AnswerConfidence.INSUFFICIENT
-                    && command.safetyMode() == AssistantSafetyMode.STRICT) {
-                log.warn("Short-circuit: INSUFFICIENT grounding in STRICT mode — fallback response");
-                return buildFallbackResponse(command, trace, citations, preLlmConfidence, startMs);
-            }
-
-            // 6. Assemble retrieval context string
-            String assembledContext = contextAssembler.assemble(budget.selectedChunks(), citations);
-
-            // 7. Build versioned prompt (citations embedded inside system prompt)
-            List<String> chunkIds = budget.selectedChunks().stream()
-                    .map(SearchPort.RetrievedChunkDto::chunkId)
-                    .collect(Collectors.toList());
-            AssembledPrompt prompt = promptBuilder.build(
-                    command.rawQuery(), assembledContext,
-                    PromptVersion.V1_LEGAL_ID, retrievalSnapshotId, chunkIds);
-
-            // 8. LLM invocation — streaming when a sink is attached, blocking otherwise
-            LlmRequest llmRequest = LlmRequest.strict(
-                    prompt.systemPrompt(), prompt.userPrompt(), traceIdStr);
-            String answerContent = (sink != null)
-                    ? invokeStreaming(llmRequest, sink)
-                    : invokeBlocking(llmRequest);
-
-            // 9. Unsupported claim detection (post-LLM)
-            List<String> unsupportedClaims = claimDetector.detect(answerContent, citations);
-
-            // 10. Hallucination guard
-            GuardResult guardResult = hallucinationGuard.guard(
-                    answerContent, preLlmConfidence, unsupportedClaims, command.safetyMode());
-            log.debug("HallucinationGuard: passed={} downgraded={} warnings={}",
-                    guardResult.passed(), guardResult.downgraded(), guardResult.warnings().size());
-
-            // 11. Resolve final answer text
-            String finalAnswer = guardResult.downgraded()
-                    ? hallucinationGuard.getFallbackMessage()
-                    : answerContent;
-
-            // 12. Follow-up suggestions
-            List<FollowUpSuggestion> followUps = followUpService.suggest(command.rawQuery(), finalAnswer);
-
-            // 13. Build structured response
             long processingMs = System.currentTimeMillis() - startMs;
             trace = trace.withProcessingMs(processingMs);
-            AssistantResponse response = buildSuccessResponse(
-                    command, trace, finalAnswer, citations, guardResult, followUps,
-                    searchResult.groundingScore(), processingMs);
 
-            // 14. Conversation memory
+            AssistantResponse response = toAssistantResponse(command, trace, result, processingMs);
+
             memoryService.store(ConversationTurn.create(
                     command.sessionId(), command.tenantId(), command.userId(),
-                    command.rawQuery(), finalAnswer,
-                    guardResult.adjustedConfidence(), guardResult.hasWarnings(),
+                    command.rawQuery(), response.answerText(),
+                    response.confidence(), response.hallucinationWarning(),
                     PromptVersion.V1_LEGAL_ID.version(), trace.traceId()));
 
-            // 15. Audit
-            auditPort.publishInteraction(buildAuditEvent(command, trace, guardResult, processingMs));
+            auditPort.publishInteraction(new AssistantAuditPort.AuditEvent(
+                    trace.traceId(), command.sessionId(), command.tenantId(), command.userId(),
+                    command.rawQuery(), trace.promptVersion(), trace.retrievalSnapshotId(),
+                    response.confidence(), command.safetyMode(),
+                    response.hallucinationWarning(), response.downgraded(), processingMs));
 
-            // 16. Metrics
-            metrics.recordInteractionCompleted(guardResult.adjustedConfidence(), processingMs);
-            if (guardResult.hasWarnings()) metrics.recordHallucinationWarning();
-            if (guardResult.downgraded())  metrics.recordDowngrade();
+            metrics.recordInteractionCompleted(response.confidence(), processingMs);
+            if (response.hallucinationWarning()) metrics.recordHallucinationWarning();
+            if (response.downgraded())           metrics.recordDowngrade();
 
-            log.info("Assistant done traceId={} confidence={} downgraded={} ms={}",
-                    trace.traceId(), guardResult.adjustedConfidence(), guardResult.downgraded(), processingMs);
+            AnswerResult.AnswerMetadata meta = result.metadata();
+            log.info("Assistant done traceId={} strategy={} llmInvoked={} sqlInvoked={} docs={} citations={} ms={}",
+                    trace.traceId(), meta.strategyUsed(), meta.llmInvoked(), meta.sqlInvoked(),
+                    meta.documentsRetrieved(), meta.citationsCount(), meta.executionTimeMs());
 
             return response;
 
@@ -215,122 +148,101 @@ public class AssistantOrchestrator implements AssistantUseCase {
             log.error("Assistant error traceId={}: {}", trace.traceId(), e.getMessage(), e);
             return AssistantResponse.error(trace.withProcessingMs(processingMs), e.getMessage());
         } finally {
-            if (sink != null) llmPort.closeStream(traceIdStr);
+            if (sink != null) answerRouter.closeStream(traceIdStr);
             MDC.remove("traceId");
             MDC.remove("tenantId");
         }
     }
 
-    private String invokeBlocking(LlmRequest llmRequest) {
-        LlmResponse llmResponse = llmPort.invoke(llmRequest);
-        log.debug("LLM response: stub={} tokens={}", llmResponse.isStub(), llmResponse.completionTokens());
-        return llmResponse.content();
-    }
-
-    /**
-     * Drives the real token-level path (Ollama NDJSON). Tokens go to the sink as they arrive and
-     * are accumulated so the post-LLM guard still sees the complete answer. A cancelled stream
-     * simply ends early: the accumulated text is whatever the model produced before the abort.
-     */
-    private String invokeStreaming(LlmRequest llmRequest, StreamSink sink) {
-        StringBuilder accumulated = new StringBuilder();
-        llmPort.stream(llmRequest, chunk -> {
-            if (chunk.done()) return;
-            String delta = chunk.delta();
-            if (delta == null || delta.isEmpty()) return;
-            accumulated.append(delta);
-            sink.onToken(delta);
-        });
-        log.debug("LLM stream complete: chars={}", accumulated.length());
-        return accumulated.toString();
-    }
-
-    private SearchPort.AssistantSearchRequest toSearchRequest(AssistantCommand command, UUID correlationId) {
-        return new SearchPort.AssistantSearchRequest(
+    private AnswerRequest toAnswerRequest(AssistantCommand command, String traceId, UUID snapshotId) {
+        return new AnswerRequest(
                 command.rawQuery(),
                 command.tenantId(),
                 command.userId(),
-                command.maxClassificationLevel().name(),
-                command.documentTypeFilter() != null ? command.documentTypeFilter().name() : null,
+                command.maxClassificationLevel(),
+                command.documentTypeFilter(),
                 command.maxResults(),
                 command.contextTokenBudget(),
-                correlationId);
+                command.safetyMode() == AssistantSafetyMode.STRICT,
+                traceId,
+                CorrelationId.of(snapshotId.toString()));
     }
 
-    private AssistantResponse buildFallbackResponse(
-            AssistantCommand command, ResponseTrace trace,
-            List<CitationDto> citations, AnswerConfidence confidence, long startMs) {
+    /**
+     * Renders any {@link AnswerResult} — SQL or RAG — into the existing response DTO. The shape is
+     * unchanged, so the mobile client cannot tell (and does not need to know) which engine answered.
+     */
+    private AssistantResponse toAssistantResponse(
+            AssistantCommand command, ResponseTrace trace, AnswerResult result, long processingMs) {
 
-        long processingMs = System.currentTimeMillis() - startMs;
-        return AssistantResponse.success(
-                trace.withProcessingMs(processingMs),
-                hallucinationGuard.getFallbackMessage(),
-                "(Tidak ada sumber yang dapat dikutip)",
-                "INSUFFICIENT — tidak ada dokumen yang cukup untuk mendukung jawaban",
-                List.of("Grounding tidak cukup untuk memberikan jawaban yang dapat dipercaya."),
-                followUpService.suggest(command.rawQuery(), "").stream()
-                        .map(FollowUpSuggestion::questionText).collect(Collectors.toList()),
-                confidence,
-                0f,
-                true,
-                true,
-                command.safetyMode(),
-                citations,
-                processingMs);
-    }
+        List<CitationDto> citations = result.citations().stream()
+                .map(this::toCitationDto)
+                .collect(Collectors.toList());
 
-    private AssistantResponse buildSuccessResponse(
-            AssistantCommand command, ResponseTrace trace,
-            String answerText, List<CitationDto> citations,
-            GuardResult guardResult, List<FollowUpSuggestion> followUps,
-            float groundingScore, long processingMs) {
+        AnswerConfidence confidence = parseConfidence(result.confidence());
 
-        String citationSection = citationInjector.formatCitationBlock(citations);
-        String confidenceSection = buildConfidenceSection(guardResult.adjustedConfidence(), groundingScore);
-        List<String> followUpTexts = followUps.stream()
+        List<String> followUps = followUpService.suggest(command.rawQuery(), result.answerText()).stream()
                 .map(FollowUpSuggestion::questionText)
                 .collect(Collectors.toList());
 
         return AssistantResponse.success(
                 trace,
-                answerText,
-                citationSection,
-                confidenceSection,
-                guardResult.warnings(),
-                followUpTexts,
-                guardResult.adjustedConfidence(),
-                groundingScore,
-                guardResult.hasWarnings(),
-                guardResult.downgraded(),
+                result.answerText(),
+                citations.isEmpty()
+                        ? "(Tidak ada sumber yang dapat dikutip)"
+                        : citationInjector.formatCitationBlock(citations),
+                buildConfidenceSection(result, confidence),
+                result.warnings(),
+                followUps,
+                confidence,
+                result.groundingScore(),
+                !result.warnings().isEmpty(),
+                result.downgraded(),
                 command.safetyMode(),
                 citations,
                 processingMs);
     }
 
-    private String buildConfidenceSection(AnswerConfidence confidence, float groundingScore) {
+    /**
+     * A deterministic answer is not "strongly grounded in documents" — it is simply true. Describing
+     * a SQL COUNT as "Tinggi (100%) — didukung dokumen" would misstate where the answer came from, so
+     * factual answers get confidence text that names the database as the source and says plainly that
+     * no AI was involved.
+     */
+    private String buildConfidenceSection(AnswerResult result, AnswerConfidence confidence) {
+        if (result.metadata().sqlInvoked()) {
+            return result.supported()
+                    ? "Pasti — jawaban dihitung langsung dari basis data (bukan dari AI)."
+                    : "Tidak tersedia — data yang dibutuhkan belum ada di sistem.";
+        }
+        float pct = result.groundingScore() * 100;
         return switch (confidence) {
-            case HIGH         -> String.format("Tinggi (%.0f%%) — jawaban didukung kuat oleh dokumen.", groundingScore * 100);
-            case MEDIUM       -> String.format("Sedang (%.0f%%) — jawaban cukup didukung; verifikasi mandiri dianjurkan.", groundingScore * 100);
-            case LOW          -> String.format("Rendah (%.0f%%) — dokumen terbatas; konsultasikan dengan notaris.", groundingScore * 100);
+            case HIGH         -> String.format("Tinggi (%.0f%%) — jawaban didukung kuat oleh dokumen.", pct);
+            case MEDIUM       -> String.format("Sedang (%.0f%%) — jawaban cukup didukung; verifikasi mandiri dianjurkan.", pct);
+            case LOW          -> String.format("Rendah (%.0f%%) — dokumen terbatas; konsultasikan dengan notaris.", pct);
             case INSUFFICIENT -> "Tidak cukup — tidak ada dokumen yang relevan ditemukan.";
         };
     }
 
-    private AssistantAuditPort.AuditEvent buildAuditEvent(
-            AssistantCommand command, ResponseTrace trace,
-            GuardResult guardResult, long processingMs) {
-        return new AssistantAuditPort.AuditEvent(
-                trace.traceId(),
-                command.sessionId(),
-                command.tenantId(),
-                command.userId(),
-                command.rawQuery(),
-                trace.promptVersion(),
-                trace.retrievalSnapshotId(),
-                guardResult.adjustedConfidence(),
-                command.safetyMode(),
-                guardResult.hasWarnings(),
-                guardResult.downgraded(),
-                processingMs);
+    private AnswerConfidence parseConfidence(String raw) {
+        if (raw == null) return AnswerConfidence.INSUFFICIENT;
+        try {
+            return AnswerConfidence.valueOf(raw);
+        } catch (IllegalArgumentException e) {
+            return AnswerConfidence.INSUFFICIENT;
+        }
+    }
+
+    private CitationDto toCitationDto(AnswerCitation c) {
+        return new CitationDto(
+                c.chunkId(),
+                c.documentId(),
+                c.documentType(),
+                c.classificationLevel(),
+                c.sectionTitle(),
+                c.chunkIndex(),
+                c.chunkText(),
+                c.sourceObjectKey(),
+                c.relevanceScore());
     }
 }

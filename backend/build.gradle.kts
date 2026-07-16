@@ -38,6 +38,8 @@ subprojects {
         "annotationProcessor"(platform("org.springframework.boot:spring-boot-dependencies:3.2.5"))
         "testImplementation"(platform("org.springframework.boot:spring-boot-dependencies:3.2.5"))
         "testImplementation"("org.junit.jupiter:junit-jupiter")
+        // Mockito + AssertJ + spring-test (MockHttpServletRequest), needed by the auth tests.
+        "testImplementation"("org.springframework.boot:spring-boot-starter-test")
         "testRuntimeOnly"("org.junit.platform:junit-platform-launcher")
     }
 

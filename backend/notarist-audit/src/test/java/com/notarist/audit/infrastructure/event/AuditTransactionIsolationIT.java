@@ -12,6 +12,7 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -64,11 +65,13 @@ class AuditTransactionIsolationIT {
 
     @SpringBootConfiguration
     @EnableAutoConfiguration
+    // Scan only handler + persistence; import the real listener explicitly so we do NOT sweep in the
+    // sibling ITs' nested @Configuration classes that share this package.
     @ComponentScan(basePackages = {
             "com.notarist.audit.application.handler",
-            "com.notarist.audit.infrastructure.persistence",
-            "com.notarist.audit.infrastructure.event"
+            "com.notarist.audit.infrastructure.persistence"
     })
+    @Import(AuditEventListener.class)
     static class ItConfig {
         /** The audit repository injects a JdbcTemplate under this exact qualifier. */
         @Bean("postgresJdbcTemplate")
@@ -76,10 +79,14 @@ class AuditTransactionIsolationIT {
         JdbcTemplate postgresJdbcTemplate(DataSource ds) {
             return new JdbcTemplate(ds);
         }
+
+        @Bean
+        TxProbe txProbe(ApplicationEventPublisher publisher) {
+            return new TxProbe(publisher);
+        }
     }
 
     /** Stands in for a service like BundleTransitionService.loadForCaller: audit a denial, then throw. */
-    @Component
     static class TxProbe {
         private final ApplicationEventPublisher publisher;
 

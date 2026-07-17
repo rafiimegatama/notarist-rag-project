@@ -7,15 +7,13 @@ dependencies {
     implementation(libs.spring.boot.starter.data.jpa)
     implementation(libs.spring.boot.starter.jdbc)
     implementation(libs.spring.boot.starter.actuator)
-    implementation(libs.ojdbc11)
     implementation(libs.postgresql)
-    implementation(libs.liquibase.core)
     implementation(libs.flyway.core)
     implementation(libs.flyway.postgresql)
     implementation(libs.qdrant.client)
-    implementation(libs.minio)
+    implementation(libs.google.cloud.storage)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers.postgresql)
-    testImplementation(libs.testcontainers.oracle.xe)
+    testImplementation(libs.embedded.postgres)
 }

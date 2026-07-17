@@ -1,0 +1,203 @@
+package com.notarist.ingest.infrastructure.persistence.postgres;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.notarist.core.domain.valueobject.*;
+import com.notarist.ingest.application.port.out.IngestJobRepository;
+import com.notarist.ingest.domain.model.*;
+import com.notarist.ingest.infrastructure.security.RlsContextApplier;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.*;
+
+/**
+ * The tenant identity is applied at the start of each method; @Transactional guarantees the
+ * notarist_set_identity() call and the subsequent JPA query share one PostgreSQL connection and
+ * transaction, which is what makes the transaction-local setting visible to the row-level-security
+ * policy. PostgreSQL discards the setting at commit/rollback, so it cannot leak to the next
+ * borrower of the pooled connection.
+ * When invoked from an already-@Transactional caller (e.g. PipelineCoordinator) these join that
+ * transaction rather than starting a new one, so no nested-transaction behaviour is introduced.
+ */
+@Repository
+@Transactional
+public class IngestionJobRepositoryImpl implements IngestJobRepository {
+
+    private static final ObjectMapper JSON = new ObjectMapper()
+            .registerModule(new JavaTimeModule());
+
+    private final IngestionJobJpaRepository jpaRepository;
+    private final RlsContextApplier rlsContextApplier;
+
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    public IngestionJobRepositoryImpl(
+            IngestionJobJpaRepository jpaRepository,
+            RlsContextApplier rlsContextApplier) {
+        this.jpaRepository = jpaRepository;
+        this.rlsContextApplier = rlsContextApplier;
+    }
+
+    @Override
+    public void save(IngestionJob job) {
+        rlsContextApplier.applyPrincipalOrSystem(entityManager);
+        jpaRepository.findById(job.getIngestionId().value().toString())
+                .map(existing -> updateEntity(existing, job))
+                .ifPresentOrElse(
+                        jpaRepository::save,
+                        () -> jpaRepository.save(toEntity(job)));
+    }
+
+    @Override
+    public Optional<IngestionJob> findByIngestionId(IngestionId ingestionId) {
+        rlsContextApplier.applyPrincipalOrSystem(entityManager);
+        return jpaRepository.findById(ingestionId.value().toString()).map(this::toDomain);
+    }
+
+    @Override
+    public Optional<IngestionJob> findByJobId(JobId jobId) {
+        rlsContextApplier.applyPrincipalOrSystem(entityManager);
+        return jpaRepository.findByJobId(jobId.value().toString()).map(this::toDomain);
+    }
+
+    @Override
+    public List<IngestionJob> findAllByChecksumAndTenantId(String checksumSha256, UUID tenantId) {
+        rlsContextApplier.applyPrincipalOrSystem(entityManager);
+        return jpaRepository.findAllByChecksumSha256AndTenantId(checksumSha256, tenantId.toString())
+                .stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<IngestionJob> findByStatusAndTenantId(PipelineStatus status, UUID tenantId, int limit) {
+        rlsContextApplier.applyPrincipalOrSystem(entityManager);
+        return jpaRepository.findByPipelineStatusAndTenantId(
+                        status.name(), tenantId.toString(), PageRequest.of(0, limit))
+                .stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<IngestionJob> findFailedAndReadyForRetry(int maxRetries, int limit) {
+        rlsContextApplier.applyPrincipalOrSystem(entityManager);
+        return jpaRepository.findFailedReadyForRetry(Instant.now(), maxRetries, PageRequest.of(0, limit))
+                .stream().map(this::toDomain).toList();
+    }
+
+    private IngestionJobJpaEntity toEntity(IngestionJob job) {
+        return new IngestionJobJpaEntity(
+                job.getIngestionId().value().toString(),
+                job.getJobId().value().toString(),
+                job.getDocumentId().value().toString(),
+                job.getTenantId().toString(),
+                job.getUploadedBy().toString(),
+                job.getDocumentType().name(),
+                job.getClassificationLevel().name(),
+                job.getOriginalFilename(),
+                job.getChecksum().sha256Hex(),
+                job.getPipelineStatus().name(),
+                job.getOverallStatus().name(),
+                job.getFailureStage(),
+                job.getRetryCount(),
+                job.getLastErrorCode(),
+                job.getLastErrorHash(),
+                job.getNextRetryAt(),
+                job.getDeadLetterReason(),
+                job.getOcrConfidence(),
+                job.getOcrObjectKey(),
+                serializeHistory(job.getStageHistory()),
+                job.getCreatedAt(),
+                job.getUpdatedAt(),
+                job.getCompletedAt());
+    }
+
+    private IngestionJobJpaEntity updateEntity(IngestionJobJpaEntity entity, IngestionJob job) {
+        entity.setPipelineStatus(job.getPipelineStatus().name());
+        entity.setOverallStatus(job.getOverallStatus().name());
+        entity.setFailureStage(job.getFailureStage());
+        entity.setRetryCount(job.getRetryCount());
+        entity.setLastErrorCode(job.getLastErrorCode());
+        entity.setLastErrorHash(job.getLastErrorHash());
+        entity.setNextRetryAt(job.getNextRetryAt());
+        entity.setDeadLetterReason(job.getDeadLetterReason());
+        entity.setOcrConfidence(job.getOcrConfidence());
+        entity.setOcrObjectKey(job.getOcrObjectKey());
+        entity.setStageHistoryJson(serializeHistory(job.getStageHistory()));
+        entity.setUpdatedAt(job.getUpdatedAt());
+        entity.setCompletedAt(job.getCompletedAt());
+        return entity;
+    }
+
+    private IngestionJob toDomain(IngestionJobJpaEntity entity) {
+        return IngestionJob.reconstruct(
+                IngestionId.of(UUID.fromString(entity.getIngestionId())),
+                new JobId(UUID.fromString(entity.getJobId())),
+                new DocumentId(UUID.fromString(entity.getDocumentId())),
+                UUID.fromString(entity.getTenantId()),
+                UUID.fromString(entity.getUploadedBy()),
+                new DocumentChecksum(entity.getChecksumSha256()),
+                JenisDokumen.valueOf(entity.getDocumentType()),
+                ClassificationLevel.valueOf(entity.getClassificationLevel()),
+                entity.getOriginalFilename(),
+                PipelineStatus.valueOf(entity.getPipelineStatus()),
+                JobStatus.valueOf(entity.getOverallStatus()),
+                deserializeHistory(entity.getStageHistoryJson()),
+                entity.getFailureStage(),
+                entity.getRetryCount(),
+                entity.getLastErrorCode(),
+                entity.getLastErrorHash(),
+                entity.getNextRetryAt(),
+                entity.getDeadLetterReason(),
+                entity.getOcrConfidence(),
+                entity.getOcrObjectKey(),
+                entity.getCreatedAt(),
+                entity.getUpdatedAt(),
+                entity.getCompletedAt());
+    }
+
+    private String serializeHistory(List<IngestionJob.StageRecord> records) {
+        try {
+            List<Map<String, Object>> list = new ArrayList<>();
+            for (IngestionJob.StageRecord r : records) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("stage", r.stage().name());
+                entry.put("completedAt", r.completedAt().toString());
+                entry.put("durationMs", r.durationMs());
+                entry.put("errorCode", r.errorCode() != null ? r.errorCode() : "");
+                entry.put("attemptNumber", r.attemptNumber());
+                list.add(entry);
+            }
+            return JSON.writeValueAsString(list);
+        } catch (JsonProcessingException e) {
+            return "[]";
+        }
+    }
+
+    private List<IngestionJob.StageRecord> deserializeHistory(String json) {
+        if (json == null || json.isBlank() || "[]".equals(json)) return new ArrayList<>();
+        try {
+            List<Map<String, Object>> raw = JSON.readValue(json, new TypeReference<>() {});
+            List<IngestionJob.StageRecord> records = new ArrayList<>();
+            for (Map<String, Object> m : raw) {
+                String errorCode = (String) m.get("errorCode");
+                records.add(new IngestionJob.StageRecord(
+                        PipelineStatus.valueOf((String) m.get("stage")),
+                        Instant.parse((String) m.get("completedAt")),
+                        ((Number) m.get("durationMs")).longValue(),
+                        (errorCode != null && !errorCode.isBlank()) ? errorCode : null,
+                        ((Number) m.get("attemptNumber")).intValue()));
+            }
+            return records;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+}

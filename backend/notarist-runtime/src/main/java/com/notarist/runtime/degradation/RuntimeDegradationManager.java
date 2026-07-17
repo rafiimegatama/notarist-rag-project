@@ -28,7 +28,7 @@ public class RuntimeDegradationManager {
 
     private static final Logger log = LoggerFactory.getLogger(RuntimeDegradationManager.class);
 
-    public enum AiRuntime { OCR, OLLAMA, EMBEDDING, RERANKER }
+    public enum AiRuntime { OCR, OLLAMA, EMBEDDING, RERANKER, NER }
 
     public enum OperationMode {
         FULL,

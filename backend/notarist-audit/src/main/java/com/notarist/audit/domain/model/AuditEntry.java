@@ -10,7 +10,7 @@ import java.util.UUID;
 /**
  * Domain entity for an audit trail entry.
  * Append-only — no update or delete permitted.
- * Persisted to NOTARIST_SEC.AUDIT_TRAIL (Oracle).
+ * Persisted to the PostgreSQL `audit_trail` table (Flyway V7) — see AuditTrailRepository.
  * Retention: 7 years per legal document domain requirement.
  */
 public class AuditEntry {
@@ -46,6 +46,31 @@ public class AuditEntry {
             Map<String, Object> detailJson,
             String ipAddress,
             String userAgent) {
+        this(auditId, correlationId, traceId, eventType, subjectType, subjectId, actorUserId,
+                actorRole, tenantId, action, outcome, detailJson, ipAddress, userAgent, Instant.now());
+    }
+
+    /**
+     * Rehydration constructor — used only by the persistence adapter when reading an
+     * existing row back. Preserves the stored created_at instead of stamping "now",
+     * which the append-time constructor above does.
+     */
+    public AuditEntry(
+            UUID auditId,
+            CorrelationId correlationId,
+            TraceId traceId,
+            AuditEventType eventType,
+            String subjectType,
+            String subjectId,
+            UUID actorUserId,
+            String actorRole,
+            UUID tenantId,
+            String action,
+            AuditOutcome outcome,
+            Map<String, Object> detailJson,
+            String ipAddress,
+            String userAgent,
+            Instant createdAt) {
         this.auditId = auditId;
         this.correlationId = correlationId;
         this.traceId = traceId;
@@ -60,7 +85,7 @@ public class AuditEntry {
         this.detailJson = detailJson == null ? Map.of() : Map.copyOf(detailJson);
         this.ipAddress = ipAddress;
         this.userAgent = userAgent;
-        this.createdAt = Instant.now();
+        this.createdAt = createdAt == null ? Instant.now() : createdAt;
     }
 
     public UUID getAuditId() { return auditId; }

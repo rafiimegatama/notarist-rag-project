@@ -23,14 +23,19 @@ services:
       - "6333:6333"
       - "6334:6334"
 
-  minio:
-    # Expose MinIO console on :9001 for local bucket inspection
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+  # NOTE: no `minio` override here. Object storage is Google Cloud Storage — there is no minio
+  # container in the base compose (see docker-compose.yml), so overriding it would make
+  # `docker compose up` fail with "service minio has neither an image nor a build context".
 
   ollama:
-    # Pull model on container start (local dev only)
-    # In production, models are pre-baked into a custom image or volume snapshot
+    # Pull models on container start (local dev only).
+    # In production, models are pre-baked into a custom image or volume snapshot.
+    #
+    # Two models are required for the RAG query path to work end to end with the default providers:
+    #   - the chat model  (LLM_PROVIDER=ollama)   — set LLM_MODEL to match the tag pulled below;
+    #     the application default is qwen3:14b, so for this lightweight dev stack export
+    #     LLM_MODEL=llama3.2:3b-instruct-q8_0 (or change the pull below to qwen3:14b).
+    #   - bge-m3          (EMBED_PROVIDER=ollama) — query-time embedding. Without it every query's
+    #     semantic retrieval silently degrades to zero vector hits (keyword-only answers).
     entrypoint: ["/bin/sh", "-c",
-      "ollama serve & sleep 5 && ollama pull llama3.2:3b-instruct-q8_0 && wait"]
+      "ollama serve & sleep 5 && ollama pull llama3.2:3b-instruct-q8_0 && ollama pull bge-m3 && wait"]

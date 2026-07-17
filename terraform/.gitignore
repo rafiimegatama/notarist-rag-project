@@ -1,0 +1,23 @@
+# Provider binaries and module caches — hundreds of MB, re-fetched by `terraform init`.
+.terraform/
+
+# Lock files: DO commit these. They pin provider versions so CI and a laptop resolve identically.
+# (Deliberately NOT ignored — listed here so nobody "helpfully" adds them.)
+# .terraform.lock.hcl
+
+# Real variable files. They hold no secrets (those live in Secret Manager) but they do carry
+# project IDs, bucket names and hostnames. Commit the .example files instead.
+terraform.tfvars
+*.auto.tfvars
+
+# Local state. Only terraform/bootstrap uses local state, and even that should not be committed —
+# it is trivially recreatable and `prevent_destroy` guards what matters.
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# Saved plans — may contain resolved variable values.
+tfplan
+*.tfplan
+
+crash.log

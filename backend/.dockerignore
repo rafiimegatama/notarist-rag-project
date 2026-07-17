@@ -1,0 +1,13 @@
+# Keep the build context small and reproducible.
+.gradle/
+build/
+*/build/
+**/build/
+.git/
+.idea/
+*.iml
+keys/
+*.pem
+.env
+.env.*
+**/*.log

@@ -28,7 +28,13 @@ public class NerWorker implements StageWorker {
     @Override
     @Transactional
     public void process(IngestionJob job, WorkerContext context) throws IngestionStageException {
-        String ocrObjectKey = buildOcrObjectKey(job);
+        String ocrObjectKey = job.getOcrObjectKey();
+        if (ocrObjectKey == null || ocrObjectKey.isBlank()) {
+            throw IngestionStageException.fatal(
+                    "INGEST_NER_NO_OCR_RESULT", PipelineStatus.NER_PENDING,
+                    "No OCR object key recorded on job for ingestionId=" + context.ingestionId()
+                    + " — OCR stage did not persist its output");
+        }
 
         log.info("NER worker starting: ingestionId={} ocrObjectKey={}", context.ingestionId(), ocrObjectKey);
 
@@ -54,9 +60,5 @@ public class NerWorker implements StageWorker {
         log.info("NER completed: ingestionId={} entities={} piiRedacted={} engine={}",
                 context.ingestionId(), result.entitiesExtracted().size(),
                 result.piiRedacted(), result.engineUsed());
-    }
-
-    private String buildOcrObjectKey(IngestionJob job) {
-        return "notarist-ocr/" + job.getTenantId() + "/" + job.getDocumentId().value() + ".txt";
     }
 }

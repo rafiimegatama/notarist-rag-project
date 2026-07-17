@@ -98,6 +98,12 @@ public class PipelineCoordinator {
             log.info("Stage {} completed for ingestionId={} in {}ms",
                     targetStage, queueRecord.ingestionId(), durationMs);
 
+            if (completedStatus == PipelineStatus.COMPLETED) {
+                // Terminal success: the document is fully ingested and searchable. Announce it so the
+                // Case context can advance. Published inside this transaction; consumed AFTER_COMMIT.
+                eventPublisher.publishDocumentIngestionTerminal(job, true);
+            }
+
             enqueueNextStage(job, completedStatus);
 
         } catch (IngestionStageException ex) {
@@ -108,8 +114,31 @@ public class PipelineCoordinator {
         }
     }
 
+    /**
+     * Advance the job to the next PENDING stage and enqueue the work for it. Both halves, together:
+     * the queue says what to run next, the job status says where the job IS, and the state machine
+     * reads the job status.
+     *
+     * <p>This used to enqueue only, and that stalled every pipeline at the first stage boundary.
+     * The job stayed on OCR_COMPLETED while the queue dispatched NER_PENDING; the NER worker then
+     * did its real work and {@code process()} asked for OCR_COMPLETED → NER_COMPLETED, which the
+     * state machine rejects (OCR_COMPLETED may only go to NER_PENDING). The result was
+     * INGEST_INVALID_TRANSITION, non-retryable, straight to the DLQ — after OCR and NER had both
+     * already succeeded and paid for their sidecar calls. UploadOrchestrationService.confirmUpload
+     * always did both halves for the first hop, which is why OCR alone appeared to work.
+     *
+     * <p>The self-mapping guard is required, not defensive: EMBED_PENDING completes AS
+     * INDEX_PENDING (there is no EMBED_COMPLETED — see PipelineStateMachine.nextPendingStage), so
+     * nextPendingStage(INDEX_PENDING) returns INDEX_PENDING and the job is already there.
+     * INDEX_PENDING → INDEX_PENDING is not a legal transition, so re-asserting it would move the
+     * stall from the NER boundary to the INDEX boundary.
+     */
     private void enqueueNextStage(IngestionJob job, PipelineStatus completedStatus) {
         PipelineStateMachine.nextPendingStage(completedStatus).ifPresent(nextStage -> {
+            if (job.getPipelineStatus() != nextStage) {
+                job.transitionTo(nextStage);
+                jobRepository.save(job);
+            }
             queueRepository.enqueue(
                     job.getIngestionId(), job.getJobId(), job.getTenantId(),
                     nextStage, "{}", Instant.now());
@@ -123,32 +152,40 @@ public class PipelineCoordinator {
             IngestQueueRepository.QueueRecord queueRecord,
             IngestionStageException ex) {
 
-        int attemptCount = queueRecord.attemptCount() + 1;
-        log.warn("Stage {} failed for ingestionId={} attempt={} errorCode={} retryable={}",
-                queueRecord.targetStage(), queueRecord.ingestionId(),
-                attemptCount, ex.getErrorCode(), ex.isRetryable(), ex);
-
         job.recordStageFailure(queueRecord.targetStage(), ex.getErrorCode(),
                 System.currentTimeMillis());
 
         metrics.recordStageFailure(queueRecord.targetStage());
 
+        // Single source of truth for retry counting is the job aggregate's retryCount.
+        // (Previously the decision used the queue row's attempt_count, which diverged from
+        // job.retryCount because RetryPolicyService re-enqueues with a reset attempt_count — F15.)
         boolean canRetry = ex.isRetryable()
-                && RetryPolicy.shouldRetry(attemptCount, maxRetries);
+                && RetryPolicy.shouldRetry(job.getRetryCount(), maxRetries);
+
+        log.warn("Stage {} failed for ingestionId={} retryCount={} errorCode={} retryable={}",
+                queueRecord.targetStage(), queueRecord.ingestionId(),
+                job.getRetryCount(), ex.getErrorCode(), ex.isRetryable(), ex);
 
         if (canRetry) {
-            Instant nextRetryAt = RetryPolicy.computeNextRetryAt(attemptCount);
-            job.scheduleRetry(nextRetryAt);
+            Instant nextRetryAt = RetryPolicy.computeNextRetryAt(job.getRetryCount() + 1);
+            job.scheduleRetry(nextRetryAt);          // retryCount -> retryCount + 1
             jobRepository.save(job);
+            // Mark the claimed row terminally FAILED and mirror the authoritative counter.
+            // RetryPolicyService alone re-enqueues (transitioning FAILED -> retry stage), so the
+            // retry is driven once, by one path, counted once.
             queueRepository.markFailed(queueRecord.queueJobId(), ex.getErrorCode(),
-                    attemptCount, nextRetryAt);
+                    job.getRetryCount(), nextRetryAt);
             log.info("Scheduled retry {} for ingestionId={} at {}",
-                    attemptCount, queueRecord.ingestionId(), nextRetryAt);
+                    job.getRetryCount(), queueRecord.ingestionId(), nextRetryAt);
         } else {
             job.moveToDlq(ex.getErrorCode() + ": " + ex.getMessage());
             jobRepository.save(job);
             queueRepository.moveToDlq(queueRecord.queueJobId(), ex.getErrorCode());
             eventPublisher.publishDlqMoved(job, ex.getErrorCode());
+            // Terminal failure: tell the Case context this document will not finish, so a case
+            // waiting on it can move to OCR_FAILED instead of hanging in OCR_RUNNING forever.
+            eventPublisher.publishDocumentIngestionTerminal(job, false);
             metrics.recordDlqMoved(queueRecord.targetStage());
             log.error("Moved to DLQ ingestionId={} reason={}", queueRecord.ingestionId(), ex.getErrorCode());
         }

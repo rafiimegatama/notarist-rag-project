@@ -7,8 +7,7 @@ import java.util.UUID;
 
 /**
  * Output port for Qdrant dense vector search.
- * Implemented by QdrantSearchAdapter (stub in Phase 3).
- * Real bge-m3 query encoding + Qdrant HTTP call deferred to Phase 2C/4.
+ * Implemented by QdrantSearchAdapter (notarist-infra) — real Qdrant HTTP client.
  */
 public interface VectorSearchPort {
 

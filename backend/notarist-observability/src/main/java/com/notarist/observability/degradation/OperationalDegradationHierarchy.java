@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Derives the system-level degradation tier from individual integration states.
  *
  * Hierarchy (highest severity wins):
- *   CRITICAL          — Oracle or PostgreSQL down; no data access; all operations blocked
+ *   CRITICAL          — PostgreSQL down; no data access; all operations blocked
  *   EMERGENCY         — MinIO down; no document storage; ingestion blocked
  *   SEARCH_ONLY       — Ollama down; assistant disabled; RAG search still returns results
  *   LIMITED_SEARCH    — Qdrant down; vector search unavailable; BM25 keyword only
@@ -91,9 +91,9 @@ public class OperationalDegradationHierarchy {
         if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.POSTGRES)) {
             level = DegradationLevel.CRITICAL;
             cause = "PostgreSQL degraded";
-        } else if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.MINIO)) {
+        } else if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.GCS)) {
             level = DegradationLevel.EMERGENCY;
-            cause = "MinIO degraded";
+            cause = "GCS degraded";
         } else if (degradedMode.isDegraded(DegradedModeRegistry.ExternalService.OLLAMA)) {
             level = DegradationLevel.SEARCH_ONLY;
             cause = "Ollama degraded";

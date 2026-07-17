@@ -26,12 +26,17 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 @RestController
 @RequestMapping("/api/v1/assistant")
 public class AssistantController {
 
     private static final Logger log = LoggerFactory.getLogger(AssistantController.class);
+
+    private static final long SSE_TIMEOUT_MS = 60_000L;
 
     private static final ExecutorService SSE_POOL = Executors.newCachedThreadPool(
             r -> { Thread t = new Thread(r, "sse-streamer"); t.setDaemon(true); return t; });
@@ -76,6 +81,14 @@ public class AssistantController {
      * POST /api/v1/assistant/ask/stream
      * SSE streaming — emits ANSWER_TOKEN, CITATION, CONFIDENCE, WARNING, FOLLOW_UP, DONE events.
      * Timeout: 60 seconds per request.
+     *
+     * <p>ANSWER_TOKEN events carry REAL LLM tokens, emitted as the model generates them
+     * (AssistantOrchestrator.askStreaming → LlmPort.stream → Ollama NDJSON).
+     *
+     * <p>Cancellation: LLM inference is a scarce, effectively single-threaded resource
+     * (InferenceQueueIsolation). If the client disconnects, the emitter times out, or the
+     * connection errors, the in-flight inference is cancelled through
+     * StreamingCancellationManager instead of being left to run for nobody.
      */
     @PostMapping(value = "/ask/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter askStream(
@@ -83,21 +96,87 @@ public class AssistantController {
             @RequestHeader(value = "X-Correlation-Id", required = false) String correlationIdHeader) {
 
         VpdContextHolder.VpdPrincipal principal = requirePrincipal();
-        SseEmitter emitter = new SseEmitter(60_000L);
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
         AssistantCommand command = buildCommand(request, principal.tenantId(), principal.userId());
 
         log.info("Assistant stream tenantId={} queryId={}", principal.tenantId(), command.queryId());
 
+        // Shared between the SSE worker thread and the container's callback threads.
+        AtomicReference<String> traceIdRef = new AtomicReference<>();
+        AtomicInteger sequence = new AtomicInteger(0);
+        AtomicBoolean inferenceDone = new AtomicBoolean(false);
+        AtomicBoolean emitterClosed = new AtomicBoolean(false);
+
+        Runnable cancelInFlightInference = () -> {
+            // Only cancel while inference may still be running; after it finishes this is a no-op
+            // so a normal emitter.complete() (which fires onCompletion) cancels nothing.
+            if (inferenceDone.get()) return;
+            String traceId = traceIdRef.get();
+            if (traceId == null) return;
+            boolean cancelled = assistantUseCase.cancelStream(traceId);
+            log.info("SSE stream ended early queryId={} traceId={} inferenceCancelled={}",
+                    command.queryId(), traceId, cancelled);
+        };
+
+        emitter.onTimeout(() -> {
+            log.warn("SSE timeout after {}ms queryId={}", SSE_TIMEOUT_MS, command.queryId());
+            emitterClosed.set(true);
+            cancelInFlightInference.run();
+            emitter.complete();
+        });
+        emitter.onError(e -> {                                   // client disconnect / write failure
+            emitterClosed.set(true);
+            cancelInFlightInference.run();
+        });
+        emitter.onCompletion(cancelInFlightInference);
+
         SSE_POOL.submit(() -> {
             try {
-                AssistantResponse response = assistantUseCase.ask(command);
-                responseStreamer.stream(response, emitter);
+                AssistantResponse response = assistantUseCase.askStreaming(command,
+                        new AssistantUseCase.StreamSink() {
+                            @Override
+                            public void onStart(String traceId) {
+                                traceIdRef.set(traceId);
+                            }
+
+                            @Override
+                            public void onToken(String token) {
+                                // Never throw back into the LLM read loop: an IOException here means
+                                // the client is gone, which must cancel the inference — not be
+                                // reported as an Ollama failure (that would mark the runtime degraded).
+                                try {
+                                    responseStreamer.emitToken(emitter, token,
+                                            UUID.fromString(traceIdRef.get()), sequence.getAndIncrement());
+                                } catch (Exception e) {
+                                    log.debug("SSE token emit failed (client gone?) queryId={}: {}",
+                                            command.queryId(), e.getMessage());
+                                    cancelInFlightInference.run();
+                                }
+                            }
+                        });
+
+                inferenceDone.set(true);
+
+                // Emitter already closed (timeout / client gone): nothing left to send to.
+                if (emitterClosed.get()) {
+                    log.info("SSE stream abandoned before completion queryId={}", command.queryId());
+                    return;
+                }
+
+                // Tokens are on the wire already — unless the pipeline short-circuited before the
+                // LLM (e.g. INSUFFICIENT grounding in STRICT mode), in which case the fallback
+                // answer text still has to be sent.
+                boolean answerAlreadySent = sequence.get() > 0;
+                responseStreamer.streamTail(response, emitter, sequence.get(), answerAlreadySent);
+
             } catch (Exception e) {
+                inferenceDone.set(true);
                 log.error("SSE error queryId={}: {}", command.queryId(), e.getMessage(), e);
+                if (emitterClosed.get()) return;
                 try {
                     emitter.send(SseEmitter.event()
                             .name("ERROR")
-                            .data(SseEvent.error(e.getMessage(), null, 0)));
+                            .data(SseEvent.error(e.getMessage(), null, sequence.get())));
                 } catch (Exception ignored) {}
                 emitter.completeWithError(e);
             }

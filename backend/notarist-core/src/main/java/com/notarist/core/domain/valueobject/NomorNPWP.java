@@ -2,7 +2,7 @@ package com.notarist.core.domain.valueobject;
 
 /**
  * Value object untuk NPWP (Nomor Pokok Wajib Pajak).
- * S1-classified: stored encrypted via Oracle TDE + AES-256 app-level.
+ * S1-classified: stored encrypted via AES-256 at the application layer (plus whatever encryption-at-rest the managed database provides).
  * NEVER log or expose the raw value.
  */
 public final class NomorNPWP {

@@ -18,8 +18,14 @@ import java.util.regex.Pattern;
 /**
  * Streams a structured AssistantResponse via SSE.
  *
+ * Two modes:
+ *   - live streaming (AssistantController.askStream): emitToken(...) per LLM token as it is
+ *     generated, then streamTail(...) for everything after the answer.
+ *   - whole-response ({@link #stream}): the finished answer is chunked by sentence. Used when
+ *     no token-level source is available.
+ *
  * Emission sequence:
- *   1. ANSWER_TOKEN — one per sentence (buffered; never raw token)
+ *   1. ANSWER_TOKEN — one per LLM token (live) or one per sentence (whole-response)
  *   2. CITATION     — one per citation entry
  *   3. CONFIDENCE   — single event with grounding level and score
  *   4. WARNING      — one per warning string
@@ -41,47 +47,101 @@ public class ResponseStreamer {
         this.objectMapper = objectMapper;
     }
 
-    public void stream(AssistantResponse response, SseEmitter emitter) {
-        AtomicInteger seq = new AtomicInteger(0);
+    /**
+     * Emits ONE live LLM token as an ANSWER_TOKEN event.
+     *
+     * <p>Used by the SSE endpoint while the model is still generating. Throws IOException when
+     * the client is gone — the caller must treat that as a cancellation signal, not as an
+     * inference failure.
+     */
+    public void emitToken(SseEmitter emitter, String token, UUID traceId, int sequence) throws IOException {
+        emit(emitter, SseEvent.answerToken(token, traceId, sequence));
+    }
+
+    /**
+     * Emits everything that follows the answer text — citations, confidence, warnings,
+     * follow-ups, DONE — and completes the emitter.
+     *
+     * @param startSequence      next free sequence number (tokens already emitted consume 0..n)
+     * @param answerAlreadySent  true when the answer was live-streamed token by token; false when
+     *                           the pipeline short-circuited (e.g. INSUFFICIENT grounding in
+     *                           STRICT mode) and never reached the LLM, in which case the
+     *                           response's answerText is emitted here instead.
+     */
+    public void streamTail(AssistantResponse response, SseEmitter emitter,
+                           int startSequence, boolean answerAlreadySent) {
+        AtomicInteger seq = new AtomicInteger(startSequence);
         UUID traceId = response.trace().traceId();
 
         try {
-            // 1. Stream answer sentence by sentence
-            String[] sentences = SENTENCE_SPLIT.split(response.answerText());
-            for (String sentence : sentences) {
-                if (!sentence.isBlank()) {
-                    emit(emitter, SseEvent.answerToken(sentence.trim(), traceId, seq.getAndIncrement()));
-                }
+            if (!answerAlreadySent) {
+                emitAnswerBySentence(response, emitter, traceId, seq);
+            } else if (response.downgraded()) {
+                // The raw tokens are already on the wire but the hallucination guard rejected the
+                // answer. We cannot un-send them, so the client is told explicitly, and the
+                // CONFIDENCE event below carries the downgraded level.
+                emit(emitter, SseEvent.warning(
+                        "Jawaban diturunkan oleh hallucination guard — " + response.answerText(),
+                        traceId, seq.getAndIncrement()));
             }
-
-            // 2. Stream citations
-            for (CitationDto citation : response.citations()) {
-                emit(emitter, SseEvent.citation(toJson(citation), traceId, seq.getAndIncrement()));
-            }
-
-            // 3. Stream confidence
-            String confidenceData = response.confidence().name()
-                    + " | score=" + String.format("%.2f", response.groundingScore());
-            emit(emitter, SseEvent.confidence(confidenceData, traceId, seq.getAndIncrement()));
-
-            // 4. Stream warnings
-            for (String warning : response.warnings()) {
-                emit(emitter, SseEvent.warning(warning, traceId, seq.getAndIncrement()));
-            }
-
-            // 5. Stream follow-up questions
-            for (String followUp : response.followUpQuestions()) {
-                emit(emitter, SseEvent.followUp(followUp, traceId, seq.getAndIncrement()));
-            }
-
-            // 6. Done event
-            emit(emitter, SseEvent.done(traceId.toString(), traceId, seq.get()));
+            emitTail(response, emitter, traceId, seq);
             emitter.complete();
 
         } catch (Exception e) {
             log.error("SSE streaming error traceId={}: {}", traceId, e.getMessage(), e);
             emitter.completeWithError(e);
         }
+    }
+
+    public void stream(AssistantResponse response, SseEmitter emitter) {
+        AtomicInteger seq = new AtomicInteger(0);
+        UUID traceId = response.trace().traceId();
+
+        try {
+            emitAnswerBySentence(response, emitter, traceId, seq);
+            emitTail(response, emitter, traceId, seq);
+            emitter.complete();
+
+        } catch (Exception e) {
+            log.error("SSE streaming error traceId={}: {}", traceId, e.getMessage(), e);
+            emitter.completeWithError(e);
+        }
+    }
+
+    private void emitAnswerBySentence(AssistantResponse response, SseEmitter emitter,
+                                      UUID traceId, AtomicInteger seq) throws IOException {
+        String[] sentences = SENTENCE_SPLIT.split(response.answerText());
+        for (String sentence : sentences) {
+            if (!sentence.isBlank()) {
+                emit(emitter, SseEvent.answerToken(sentence.trim(), traceId, seq.getAndIncrement()));
+            }
+        }
+    }
+
+    private void emitTail(AssistantResponse response, SseEmitter emitter,
+                          UUID traceId, AtomicInteger seq) throws IOException {
+        // 2. Stream citations
+        for (CitationDto citation : response.citations()) {
+            emit(emitter, SseEvent.citation(toJson(citation), traceId, seq.getAndIncrement()));
+        }
+
+        // 3. Stream confidence
+        String confidenceData = response.confidence().name()
+                + " | score=" + String.format("%.2f", response.groundingScore());
+        emit(emitter, SseEvent.confidence(confidenceData, traceId, seq.getAndIncrement()));
+
+        // 4. Stream warnings
+        for (String warning : response.warnings()) {
+            emit(emitter, SseEvent.warning(warning, traceId, seq.getAndIncrement()));
+        }
+
+        // 5. Stream follow-up questions
+        for (String followUp : response.followUpQuestions()) {
+            emit(emitter, SseEvent.followUp(followUp, traceId, seq.getAndIncrement()));
+        }
+
+        // 6. Done event
+        emit(emitter, SseEvent.done(traceId.toString(), traceId, seq.get()));
     }
 
     private void emit(SseEmitter emitter, SseEvent event) throws IOException {

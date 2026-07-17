@@ -1,133 +1,99 @@
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-  Alert,
-} from 'react-native';
-import { useAuth } from '../contexts/AuthContext';
+import { View, TouchableOpacity } from 'react-native';
+import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import Screen from '../components/Screen';
+import Card from '../components/Card';
+import AppText from '../components/AppText';
+import TextField from '../components/TextField';
+import Button from '../components/Button';
+import Banner from '../components/Banner';
+import { APP } from '../constants/config';
 
-export default function LoginScreen() {
+/**
+ * Sign-in screen. The auth flow itself is unchanged — it still calls AuthContext.signIn(), which
+ * owns token storage. Only the presentation changed: themed components, inline error state instead
+ * of a modal Alert, and a submit disabled until both fields are filled.
+ */
+export default function LoginScreen({ navigation }) {
   const { signIn } = useAuth();
+  const theme = useTheme();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const canSubmit = username.trim().length > 0 && password.length > 0 && !loading;
 
   const handleLogin = async () => {
-    if (!username.trim() || !password.trim()) {
-      Alert.alert('Error', 'Username dan password wajib diisi');
-      return;
-    }
+    if (!canSubmit) return;
+    setError(null);
     setLoading(true);
     try {
       await signIn(username.trim(), password);
     } catch (err) {
-      const msg = err.response?.data?.errorMessage || 'Login gagal. Periksa kredensial Anda.';
-      Alert.alert('Login Gagal', msg);
+      setError(err.response?.data?.errorMessage || 'Login gagal. Periksa kredensial Anda.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={styles.card}>
-        <Text style={styles.logo}>⚖️ Notarist</Text>
-        <Text style={styles.subtitle}>Sistem Manajemen Dokumen Notaris</Text>
+    <Screen scroll keyboardAware contentContainerStyle={{ justifyContent: 'center' }}>
+      <View style={{ alignItems: 'center', marginBottom: theme.spacing.xl }}>
+        <AppText style={{ fontSize: 44 }}>⚖️</AppText>
+        <AppText variant="h1" style={{ marginTop: theme.spacing.sm }}>{APP.name}</AppText>
+        <AppText color="textMuted" variant="bodySm" style={{ marginTop: theme.spacing.xs }}>
+          {APP.tagline}
+        </AppText>
+      </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Username"
-          placeholderTextColor="#9CA3AF"
+      <Card>
+        {error ? (
+          <Banner
+            variant="danger"
+            title="Login Gagal"
+            message={error}
+            style={{ marginBottom: theme.spacing.lg }}
+          />
+        ) : null}
+
+        <TextField
+          label="Username"
           value={username}
           onChangeText={setUsername}
-          autoCapitalize="none"
-          autoCorrect={false}
+          placeholder="username"
+          editable={!loading}
+          returnKeyType="next"
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          placeholderTextColor="#9CA3AF"
+        <TextField
+          label="Password"
           value={password}
           onChangeText={setPassword}
+          placeholder="Password"
           secureTextEntry
+          editable={!loading}
+          returnKeyType="go"
+          onSubmitEditing={handleLogin}
+        />
+
+        <Button
+          title="Masuk"
+          onPress={handleLogin}
+          disabled={!canSubmit}
+          loading={loading}
+          style={{ marginTop: theme.spacing.sm }}
         />
 
         <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleLogin}
-          disabled={loading}
+          onPress={() => navigation?.navigate('Register')}
+          style={{ marginTop: theme.spacing.lg, alignItems: 'center' }}
         >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Masuk</Text>
-          )}
+          <AppText color="textMuted" variant="bodySm">
+            Belum punya akun? <AppText style={{ color: theme.colors.primary }}>Daftar</AppText>
+          </AppText>
         </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+      </Card>
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: '#1E293B',
-    borderRadius: 16,
-    padding: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  logo: {
-    fontSize: 36,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  subtitle: {
-    color: '#94A3B8',
-    textAlign: 'center',
-    fontSize: 14,
-    marginBottom: 32,
-  },
-  input: {
-    backgroundColor: '#0F172A',
-    color: '#F1F5F9',
-    borderRadius: 8,
-    padding: 14,
-    marginBottom: 12,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  button: {
-    backgroundColor: '#3B82F6',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-});

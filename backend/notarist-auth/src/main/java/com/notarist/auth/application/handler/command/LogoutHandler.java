@@ -35,6 +35,16 @@ public class LogoutHandler implements InvalidateSessionUseCase {
                 .orElse(null);
 
         if (session != null && !session.getUserId().value().equals(command.callerUserId())) {
+            // Someone trying to terminate another user's session is a security event in its own
+            // right, not just a rejected request — it left no audit trace before.
+            eventPublisher.publishEvent(new AuditEventPayload(
+                    "SECURITY_ACCESS_DENIED", "SESSION", command.sessionId().value().toString(),
+                    command.callerUserId(), "UNKNOWN",
+                    session.getTenantId(), "LOGOUT", "FAILURE", null,
+                    command.correlationId().value(),
+                    Map.of("reason", "SESSION_OWNERSHIP_VIOLATION",
+                           "sessionId", command.sessionId().value().toString())
+            ));
             throw new UnauthorizedAccessException(
                     "AUTH_SESSION_OWNERSHIP", "Session does not belong to the caller");
         }

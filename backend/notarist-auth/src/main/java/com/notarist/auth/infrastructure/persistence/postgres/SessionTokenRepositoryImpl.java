@@ -74,6 +74,19 @@ public class SessionTokenRepositoryImpl implements SessionTokenRepository {
     }
 
     @Override
+    public boolean invalidateIfActive(SessionId sessionId) {
+        // Compare-and-set: the WHERE ... AND invalidated = false guard makes this atomic
+        // at the row level. Under concurrent refresh of the same token, the first UPDATE
+        // flips the row and affects 1 row; every subsequent UPDATE sees invalidated = true
+        // and affects 0 rows. Exactly one caller observes a return value of true.
+        int rows = postgresJdbcTemplate.update(
+                "UPDATE session_token SET invalidated = true WHERE session_id = ? AND invalidated = false",
+                sessionId.value()
+        );
+        return rows == 1;
+    }
+
+    @Override
     public void invalidateAllByUserId(PersonId userId) {
         postgresJdbcTemplate.update(
                 "UPDATE session_token SET invalidated = true WHERE user_id = ?",

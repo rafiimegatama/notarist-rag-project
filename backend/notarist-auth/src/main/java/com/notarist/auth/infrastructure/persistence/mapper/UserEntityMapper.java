@@ -2,8 +2,8 @@ package com.notarist.auth.infrastructure.persistence.mapper;
 
 import com.notarist.auth.domain.model.Role;
 import com.notarist.auth.domain.model.User;
-import com.notarist.auth.infrastructure.persistence.oracle.UserJpaEntity;
-import com.notarist.auth.infrastructure.persistence.oracle.UserRoleJpaEntity;
+import com.notarist.auth.infrastructure.persistence.postgres.UserJpaEntity;
+import com.notarist.auth.infrastructure.persistence.postgres.UserRoleJpaEntity;
 import com.notarist.core.domain.valueobject.PersonId;
 import org.springframework.stereotype.Component;
 

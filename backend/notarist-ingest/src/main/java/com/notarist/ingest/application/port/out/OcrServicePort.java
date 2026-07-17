@@ -4,8 +4,7 @@ import java.util.List;
 
 /**
  * Output port for OCR text extraction.
- * Implemented by OcrServiceAdapter (PaddleOCR sidecar stub in Phase 2).
- * Real PaddleOCR HTTP invocation deferred to Phase 2C.
+ * Implemented by PaddleOcrAdapter in notarist-runtime (real PaddleOCR HTTP call).
  */
 public interface OcrServicePort {
 

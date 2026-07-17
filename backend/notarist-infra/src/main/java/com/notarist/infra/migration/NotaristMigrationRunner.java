@@ -9,15 +9,15 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Validates migration state on startup after all datasources are ready.
+ * Validates migration state on startup after the datasource is ready.
  *
- * Coordinates:
- *   - Flyway for PostgreSQL (search schema, chunk_index, search_query_log)
- *   - Liquibase for Oracle 19C (handled by Spring Boot auto-config on primary datasource)
+ * Flyway owns the whole PostgreSQL database — auth, documents, ingest, search, audit and the
+ * tenant-isolation RLS policies. (It used to share the job with Liquibase/Oracle; that half is
+ * gone, so there is a single migration state to report.)
  *
  * This runner does NOT execute migrations — Flyway.migrate() is called in FlywaySearchConfig.
- * This runner validates that both datastores are in an expected migration state
- * and logs a clear status for operations observability.
+ * It validates that the datastore is in an expected migration state and logs a clear status
+ * for operations observability.
  *
  * If validation fails, the application continues but logs a WARNING.
  * Hard failures should be surfaced via MigrationHealthIndicator, not by crashing on startup.

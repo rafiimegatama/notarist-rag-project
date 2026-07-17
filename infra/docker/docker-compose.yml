@@ -1,35 +1,18 @@
 version: '3.9'
 
 # NOTARIST RAG PLATFORM — Infrastructure Stack
-# Oracle 19C NOT included: requires enterprise license.
-# Provision Oracle separately and set ORACLE_* variables in .env.
+# The application database is PostgreSQL (Supabase in production); point POSTGRES_URL at it.
 
 services:
 
   # ─────────────────────────────────────────────
-  # MinIO — Object storage for raw documents and OCR output
+  # Object storage is Google Cloud Storage — there is no local storage container.
+  # For local development, authenticate the app to real GCS with:
+  #     gcloud auth application-default login
+  # and set GCS_BUCKET (+ optionally GCS_CREDENTIALS_PATH). A fake-gcs-server emulator can be
+  # used for offline object I/O, but it does not support V4 signed-URL verification, so the
+  # upload flow is best exercised against a real (dev) bucket.
   # ─────────────────────────────────────────────
-  minio:
-    image: minio/minio:RELEASE.2024-03-15T01-07-15Z
-    container_name: notarist-minio
-    command: server /data --console-address ":9001"
-    ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
-    environment:
-      MINIO_ROOT_USER:     ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-me-in-production}
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    restart: unless-stopped
-    networks:
-      - notarist-net
 
   # ─────────────────────────────────────────────
   # PostgreSQL — BM25 keyword search (chunk_index) + search_query_log
@@ -113,15 +96,134 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
+  # ─────────────────────────────────────────────
+  # ML SIDECARS (Sprint 7) — the services the Java runtime adapters call over HTTP.
+  # Source: ../sidecars/{ocr,ner,reranker,embedding}. Each speaks the exact contract its
+  # Java adapter expects (see infra/sidecars/README.md). Models download on first boot and
+  # cache to the named *-models volumes, so the slow start only happens once.
+  #
+  # Object storage: OCR and NER read/write GCS by object key. Point them at your bucket with
+  # GCS_BUCKET (+ ADC / GOOGLE_APPLICATION_CREDENTIALS), or at fake-gcs-server for offline dev
+  # via STORAGE_EMULATOR_HOST (see the `local-storage` profile at the bottom of this file).
+  # ─────────────────────────────────────────────
+
+  # PaddleOCR — POST /predict/ocr_system  (OCR_ENDPOINT=http://localhost:8081)
+  ocr:
+    build:
+      context: ../sidecars/ocr
+    container_name: notarist-ocr
+    ports:
+      - "${OCR_PORT:-8081}:8081"
+    environment:
+      OCR_USE_GPU:            ${OCR_USE_GPU:-false}
+      OCR_PDF_DPI:            ${OCR_PDF_DPI:-200}
+      GCS_BUCKET:             ${GCS_BUCKET:-notarist-local}
+      GCS_PROJECT:            ${GOOGLE_CLOUD_PROJECT:-}
+      STORAGE_EMULATOR_HOST:  ${STORAGE_EMULATOR_HOST:-}
+      # Mount a service-account key and set this for local runs against real GCS:
+      # GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcs-key.json
+    volumes:
+      - ocr-models:/models
+      - ocr-paddle:/root/.paddleocr
+      # - ${GCS_CREDENTIALS_PATH:-./noop}:/secrets/gcs-key.json:ro
+    restart: unless-stopped
+    networks:
+      - notarist-net
+
+  # IndoBERT NER + PII redaction — POST /extract  (NER_BASE_URL=http://localhost:8082)
+  ner:
+    build:
+      context: ../sidecars/ner
+    container_name: notarist-ner
+    ports:
+      - "${NER_PORT:-8082}:8082"
+    environment:
+      NER_MODEL:              ${NER_MODEL:-cahya/bert-base-indonesian-NER}
+      NER_DEVICE:             ${NER_DEVICE:--1}
+      GCS_BUCKET:             ${GCS_BUCKET:-notarist-local}
+      GCS_PROJECT:            ${GOOGLE_CLOUD_PROJECT:-}
+      STORAGE_EMULATOR_HOST:  ${STORAGE_EMULATOR_HOST:-}
+      # GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcs-key.json
+    volumes:
+      - ner-models:/models
+      # - ${GCS_CREDENTIALS_PATH:-./noop}:/secrets/gcs-key.json:ro
+    restart: unless-stopped
+    networks:
+      - notarist-net
+
+  # Cross-encoder reranker (bge-reranker-v2-m3) — POST /rerank  (RERANKER_BASE_URL=http://localhost:8083)
+  # Only exercised when RERANK_PROVIDER=crossencoder; default RERANK_PROVIDER=none needs nothing.
+  reranker:
+    build:
+      context: ../sidecars/reranker
+    container_name: notarist-reranker
+    ports:
+      - "${RERANKER_PORT:-8083}:8083"
+    environment:
+      RERANK_MODEL:  ${RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      RERANK_DEVICE: ${RERANK_DEVICE:-cpu}
+    volumes:
+      - reranker-models:/models
+    restart: unless-stopped
+    networks:
+      - notarist-net
+
+  # bge-m3 dense embeddings — POST /embed  (EMBEDDING_BASE_URL=http://localhost:8084)
+  # Only exercised when EMBED_PROVIDER=sidecar; default EMBED_PROVIDER=ollama serves bge-m3 itself.
+  embedding:
+    build:
+      context: ../sidecars/embedding
+    container_name: notarist-embedding
+    ports:
+      - "${EMBEDDING_PORT:-8084}:8084"
+    environment:
+      EMBED_MODEL: ${EMBED_MODEL:-BAAI/bge-m3}
+      EMBED_FP16:  ${EMBED_FP16:-false}
+    volumes:
+      - embedding-models:/models
+    restart: unless-stopped
+    networks:
+      - notarist-net
+
+  # ─────────────────────────────────────────────
+  # OPTIONAL — offline object storage for local dev. Opt in with:
+  #     docker compose --profile local-storage up
+  # then export STORAGE_EMULATOR_HOST=http://fake-gcs:4443 (in-network) or http://localhost:4443
+  # (host), and pre-create the bucket named by GCS_BUCKET. The backend's own GcsClientConfig would
+  # also need pointing at the emulator for a full local E2E — see infra/sidecars/README.md.
+  # ─────────────────────────────────────────────
+  fake-gcs:
+    image: fsouza/fake-gcs-server:1.49
+    container_name: notarist-fake-gcs
+    profiles: ["local-storage"]
+    command: ["-scheme", "http", "-port", "4443", "-public-host", "fake-gcs:4443"]
+    ports:
+      - "${FAKE_GCS_PORT:-4443}:4443"
+    volumes:
+      - fake-gcs-data:/storage
+    restart: unless-stopped
+    networks:
+      - notarist-net
+
 volumes:
-  minio-data:
-    name: notarist_minio_data
   postgres-data:
     name: notarist_postgres_data
   qdrant-data:
     name: notarist_qdrant_data
   ollama-models:
     name: notarist_ollama_models
+  ocr-models:
+    name: notarist_ocr_models
+  ocr-paddle:
+    name: notarist_ocr_paddle
+  ner-models:
+    name: notarist_ner_models
+  reranker-models:
+    name: notarist_reranker_models
+  embedding-models:
+    name: notarist_embedding_models
+  fake-gcs-data:
+    name: notarist_fake_gcs_data
 
 networks:
   notarist-net:

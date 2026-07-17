@@ -33,16 +33,21 @@ public class IngestionQueueRepositoryImpl implements IngestQueueRepository {
             VALUES (?, ?, ?, ?, ?, 'PENDING', ?::jsonb, 0, ?, NOW())
             """;
 
-    private static final String SQL_DEQUEUE_SKIP_LOCKED = """
-            SELECT queue_job_id, ingestion_id, job_id, tenant_id,
-                   target_stage, payload, attempt_count, scheduled_at
-            FROM ingestion_queue
-            WHERE target_stage = ?
-              AND status = 'PENDING'
-              AND scheduled_at <= NOW()
-            ORDER BY scheduled_at
-            FOR UPDATE SKIP LOCKED
-            LIMIT ?
+    private static final String SQL_CLAIM_SKIP_LOCKED = """
+            UPDATE ingestion_queue
+            SET status = 'PROCESSING', locked_by = ?, locked_at = NOW()
+            WHERE queue_job_id IN (
+                SELECT queue_job_id
+                FROM ingestion_queue
+                WHERE target_stage = ?
+                  AND status = 'PENDING'
+                  AND scheduled_at <= NOW()
+                ORDER BY scheduled_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT ?
+            )
+            RETURNING queue_job_id, ingestion_id, job_id, tenant_id,
+                      target_stage, payload, attempt_count, scheduled_at
             """;
 
     private static final String SQL_MARK_COMPLETED = """
@@ -51,15 +56,18 @@ public class IngestionQueueRepositoryImpl implements IngestQueueRepository {
             WHERE queue_job_id = ?
             """;
 
+    // Marks the claimed row terminally FAILED (not back to PENDING). RetryPolicyService is the
+    // single re-enqueue driver — it transitions the job from FAILED to its retry stage and inserts
+    // a fresh PENDING row. Re-PENDING here would create a second, competing retry driver and reset
+    // the attempt bookkeeping (F15). attempt_count mirrors the authoritative job.retryCount.
     private static final String SQL_MARK_FAILED = """
             UPDATE ingestion_queue
-            SET status = 'PENDING',
+            SET status = 'FAILED',
                 attempt_count = ?,
                 next_retry_at = ?,
                 error_detail = ?,
                 locked_by = NULL,
-                locked_at = NULL,
-                scheduled_at = ?
+                locked_at = NULL
             WHERE queue_job_id = ?
             """;
 
@@ -76,13 +84,6 @@ public class IngestionQueueRepositoryImpl implements IngestQueueRepository {
     private static final String SQL_COUNT_PENDING = """
             SELECT COUNT(*) FROM ingestion_queue
             WHERE tenant_id = ? AND status = 'PENDING'
-            """;
-
-    private static final String SQL_LOCK_WORKER = """
-            UPDATE ingestion_queue
-            SET status = 'PROCESSING', locked_by = ?, locked_at = NOW()
-            WHERE queue_job_id = ?
-              AND status = 'PENDING'
             """;
 
     private final JdbcTemplate postgresJdbcTemplate;
@@ -107,17 +108,20 @@ public class IngestionQueueRepositoryImpl implements IngestQueueRepository {
         log.debug("Enqueued stage={} queueJobId={} ingestionId={}", targetStage, queueJobId, ingestionId);
     }
 
+    /**
+     * Claims up to {@code limit} pending records in a single atomic
+     * UPDATE ... WHERE IN (SELECT ... FOR UPDATE SKIP LOCKED) ... RETURNING
+     * statement. Atomicity within one statement is required because this
+     * datasource runs with autocommit (no transaction manager exists for it) —
+     * a separate SELECT-then-UPDATE would let two scheduler nodes claim the
+     * same rows between the two statements.
+     */
     @Override
     public List<QueueRecord> dequeueForProcessing(PipelineStatus targetStage, String workerId, int limit) {
-        List<QueueRecord> records = postgresJdbcTemplate.query(
-                SQL_DEQUEUE_SKIP_LOCKED,
+        return postgresJdbcTemplate.query(
+                SQL_CLAIM_SKIP_LOCKED,
                 this::mapRow,
-                targetStage.name(), limit);
-
-        for (QueueRecord record : records) {
-            postgresJdbcTemplate.update(SQL_LOCK_WORKER, workerId, record.queueJobId());
-        }
-        return records;
+                workerId, targetStage.name(), limit);
     }
 
     @Override
@@ -130,9 +134,8 @@ public class IngestionQueueRepositoryImpl implements IngestQueueRepository {
 
     @Override
     public void markFailed(UUID queueJobId, String errorCode, int attemptCount, Instant nextRetryAt) {
-        Timestamp retryTs = Timestamp.from(nextRetryAt);
         postgresJdbcTemplate.update(SQL_MARK_FAILED,
-                attemptCount, retryTs, errorCode, retryTs, queueJobId);
+                attemptCount, Timestamp.from(nextRetryAt), errorCode, queueJobId);
     }
 
     @Override

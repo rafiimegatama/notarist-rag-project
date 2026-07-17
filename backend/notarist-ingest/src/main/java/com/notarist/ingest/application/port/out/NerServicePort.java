@@ -6,8 +6,7 @@ import java.util.Map;
 
 /**
  * Output port for Named Entity Recognition extraction.
- * Implemented by NerServiceAdapter (IndoBERT sidecar stub in Phase 2).
- * Real IndoBERT HTTP invocation deferred to Phase 2C.
+ * Implemented by IndoBertNerAdapter in notarist-runtime (real IndoBERT HTTP call).
  */
 public interface NerServicePort {
 

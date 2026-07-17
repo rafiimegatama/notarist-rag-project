@@ -55,7 +55,10 @@ public class RefreshTokenHandler implements RefreshTokenUseCase {
                     "AUTH_EXPIRED_REFRESH_TOKEN", "Refresh token expired or invalidated");
         }
 
-        User user = userRepository.findById(existing.getUserId())
+        // Scoped to the tenant carried on the validated session: /auth/refresh is permitAll, so
+        // there is no principal to derive a VPD identity from, and the fail-closed tenant policy
+        // would hide the row from a bare id lookup.
+        User user = userRepository.findByIdAndTenantId(existing.getUserId(), existing.getTenantId())
                 .orElseThrow(() -> new UnauthorizedAccessException(
                         "AUTH_USER_NOT_FOUND", "User no longer exists"));
 
@@ -63,7 +66,15 @@ public class RefreshTokenHandler implements RefreshTokenUseCase {
             throw new UnauthorizedAccessException("AUTH_ACCOUNT_DISABLED", "Account is disabled");
         }
 
-        sessionTokenRepository.invalidate(existing.getSessionId());
+        // Atomically consume the presented refresh token before issuing new credentials.
+        // This is the transaction boundary for rotation: if another request already rotated
+        // this token (concurrent refresh or replay), the compare-and-set affects 0 rows and
+        // we reject here — preventing a token-reuse double-issue race.
+        if (!sessionTokenRepository.invalidateIfActive(existing.getSessionId())) {
+            throw new UnauthorizedAccessException(
+                    "AUTH_REFRESH_TOKEN_REUSED",
+                    "Refresh token already used or rotated concurrently");
+        }
 
         String newAccessToken = jwtService.issueAccessToken(user, command.correlationId());
         String newOpaqueToken = RefreshTokenFactory.generateOpaqueToken();

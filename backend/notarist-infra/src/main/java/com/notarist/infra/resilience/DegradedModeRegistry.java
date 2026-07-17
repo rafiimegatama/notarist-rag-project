@@ -26,7 +26,7 @@ public class DegradedModeRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(DegradedModeRegistry.class);
 
-    public enum ExternalService { MINIO, QDRANT, POSTGRES, OLLAMA, OCR, EMBEDDING }
+    public enum ExternalService { GCS, QDRANT, POSTGRES, OLLAMA, OCR, EMBEDDING }
 
     private final Map<ExternalService, DegradedState> state = new ConcurrentHashMap<>();
 

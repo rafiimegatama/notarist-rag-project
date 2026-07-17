@@ -8,8 +8,8 @@ import java.util.function.Consumer;
 
 /**
  * Output port for LLM inference.
- * Implemented by OllamaAdapter (stub in Phase 4).
- * Real Ollama HTTP integration deferred to Phase 5.
+ * Implemented by OllamaRuntimeAdapter in notarist-runtime
+ * (real Ollama HTTP + NDJSON streaming).
  */
 public interface LlmPort {
 
@@ -19,6 +19,24 @@ public interface LlmPort {
     /** Streaming invocation — calls chunkConsumer for each token chunk. */
     void stream(LlmRequest request, Consumer<LlmStreamChunk> chunkConsumer);
 
-    /** Returns false in Phase 4 stub — no real Ollama connection. */
+    /** True when the LLM runtime is reachable and not degraded. */
     boolean isAvailable();
+
+    /**
+     * Opens a cancellable scope for traceId BEFORE {@link #stream} is called.
+     *
+     * <p>Without this, a cancel that arrives while the request is still queued behind the
+     * single-threaded inference executor would be lost, and the inference would then run to
+     * completion for a client that is already gone. Must be paired with {@link #closeStream}.
+     */
+    default void openStream(String traceId) { }
+
+    /**
+     * Cancels the in-flight (or still-queued) streaming inference for traceId.
+     * Idempotent; returns false if nothing was cancellable.
+     */
+    default boolean cancelStream(String traceId) { return false; }
+
+    /** Releases the cancellable scope for traceId. Idempotent. */
+    default void closeStream(String traceId) { }
 }

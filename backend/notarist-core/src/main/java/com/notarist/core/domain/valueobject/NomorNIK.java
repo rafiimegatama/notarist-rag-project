@@ -2,7 +2,7 @@ package com.notarist.core.domain.valueobject;
 
 /**
  * Value object untuk NIK (Nomor Induk Kependudukan).
- * S1-classified: stored encrypted via Oracle TDE + AES-256 app-level.
+ * S1-classified: stored encrypted via AES-256 at the application layer (plus whatever encryption-at-rest the managed database provides).
  * NEVER log or expose the raw value — only expose masked form: ****-****-****-1234.
  */
 public final class NomorNIK {
@@ -15,7 +15,7 @@ public final class NomorNIK {
         this.encryptedValue = encryptedValue;
     }
 
-    /** Create from already-encrypted storage value (from Oracle). */
+    /** Create from already-encrypted storage value (as read from the database). */
     public static NomorNIK fromEncrypted(String encryptedValue) {
         if (encryptedValue == null || encryptedValue.isBlank()) {
             throw new IllegalArgumentException("Encrypted NIK must not be null or blank");

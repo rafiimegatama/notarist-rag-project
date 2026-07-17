@@ -2,7 +2,6 @@ package com.notarist.ingest.config;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import io.minio.MinioClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -16,17 +15,6 @@ import javax.sql.DataSource;
 @Configuration
 @EnableScheduling
 public class IngestModuleConfig {
-
-    @Bean("ingestMinioClient")
-    public MinioClient minioClient(
-            @Value("${notarist.minio.endpoint:http://localhost:9000}") String endpoint,
-            @Value("${notarist.minio.access-key:minioadmin}") String accessKey,
-            @Value("${notarist.minio.secret-key:minioadmin}") String secretKey) {
-        return MinioClient.builder()
-                .endpoint(endpoint)
-                .credentials(accessKey, secretKey)
-                .build();
-    }
 
     @Bean("ingestPostgresDataSource")
     public DataSource ingestPostgresDataSource(
@@ -44,7 +32,10 @@ public class IngestModuleConfig {
         config.setIdleTimeout(600_000);
         config.setMaxLifetime(1_800_000);
         config.setPoolName("IngestPostgresPool");
-        config.setAutoCommit(false);
+        // autoCommit must stay true (Hikari default): no PlatformTransactionManager
+        // exists for this datasource, so JdbcTemplate statements run on raw pooled
+        // connections — with autocommit off, Hikari rolls the work back when the
+        // connection returns to the pool and every queue/chunk write is silently lost.
         return new HikariDataSource(config);
     }
 

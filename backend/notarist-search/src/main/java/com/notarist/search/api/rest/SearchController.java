@@ -11,6 +11,7 @@ import com.notarist.search.application.port.in.SearchUseCase;
 import com.notarist.search.application.query.SearchQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -75,10 +76,21 @@ public class SearchController {
 
         SearchResponse response = searchUseCase.search(query);
 
-        ApiResponse<SearchResponse> apiResponse = "SUCCESS".equals(response.status())
-                ? ApiResponse.success(ApiMeta.of(correlationId.value()), response)
-                : ApiResponse.error(ApiMeta.of(correlationId.value()), "SEARCH_FAILED", response.errorMessage());
+        if ("SUCCESS".equals(response.status())) {
+            return ResponseEntity.ok(ApiResponse.success(ApiMeta.of(correlationId.value()), response));
+        }
 
-        return ResponseEntity.ok(apiResponse);
+        // A failed search must not be an HTTP 200.
+        //
+        // This previously built the ERROR envelope and then returned it inside ResponseEntity.ok(),
+        // so a caller that checks the status code — which is every HTTP client, cache and proxy —
+        // saw 200 OK for "qdrant.search failed after 3 attempts". The failure was only visible to a
+        // caller that ignored the status and parsed the body, and it never counted toward the 5xx
+        // error-rate alert in modules/monitoring, so a fully broken vector backend looked healthy.
+        log.warn("Search failed queryId={} correlationId={}: {}",
+                query.queryId(), correlationId.value(), response.errorMessage());
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponse.error(
+                        ApiMeta.of(correlationId.value()), "SEARCH_FAILED", response.errorMessage()));
     }
 }

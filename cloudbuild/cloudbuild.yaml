@@ -1,0 +1,218 @@
+# =============================================================================
+# Notarist — build, test, push, deploy.
+#
+# Triggered from a git push. Runs as the deployer service account created by the service_account
+# module (NOT the legacy Cloud Build default SA, which is over-privileged by design).
+#
+# Deliberate ordering choice: TESTS RUN BEFORE THE IMAGE IS PUSHED.
+# The Dockerfile builds with `-x test` because a container build is the wrong place to discover a
+# failing test — you want the failure attributed to the commit, not buried in a layer. So the
+# pipeline runs the real Gradle build (with tests) first, and only then builds the image. An image
+# in the registry therefore always corresponds to a commit whose tests passed.
+#
+# Substitutions (set on the trigger):
+#   _ENVIRONMENT  dev | staging | prod
+#   _REGION       e.g. asia-southeast2
+#   _REPOSITORY   Artifact Registry repo ID (default: notarist)
+#   _SERVICE      Cloud Run service name (default: notarist-<env>-api)
+#   _RUNTIME_SA   runtime service account email (from terraform output runtime_service_account)
+# =============================================================================
+
+substitutions:
+  _ENVIRONMENT: "dev"
+  _REGION: "asia-southeast2"
+  _REPOSITORY: "notarist"
+  _SERVICE: ""
+  _RUNTIME_SA: ""
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: "E2_HIGHCPU_8" # A Gradle multi-module build is CPU-bound; a bigger machine is cheaper than a longer build.
+  dynamicSubstitutions: true
+
+timeout: "2400s"
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/notarist-backend:${SHORT_SHA}"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/notarist-backend:${_ENVIRONMENT}"
+
+steps:
+  # ---------------------------------------------------------------------------
+  # 1. Build + TEST. Fail here, before anything is published.
+  # ---------------------------------------------------------------------------
+  - id: "gradle-build-and-test"
+    name: "gradle:8.7-jdk17"
+    dir: "backend"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        ./gradlew clean build --no-daemon
+
+  # ---------------------------------------------------------------------------
+  # 2. Build the image. Cache from the previous env tag so an unchanged dependency
+  #    layer is not rebuilt every commit.
+  # ---------------------------------------------------------------------------
+  - id: "docker-build"
+    name: "gcr.io/cloud-builders/docker"
+    dir: "backend"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/notarist-backend"
+
+        # Pull the current env image to warm the layer cache. It may not exist on a first build,
+        # so a failure here is expected and must not fail the pipeline.
+        docker pull "$${IMAGE}:${_ENVIRONMENT}" || echo "no cache image yet — first build"
+
+        docker build \
+          --cache-from "$${IMAGE}:${_ENVIRONMENT}" \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          -t "$${IMAGE}:${SHORT_SHA}" \
+          -t "$${IMAGE}:${_ENVIRONMENT}" \
+          .
+    waitFor: ["gradle-build-and-test"]
+
+  # ---------------------------------------------------------------------------
+  # 3. Verify every secret the service needs actually HAS a version.
+  #
+  #    Terraform creates secret CONTAINERS; a human writes the values. A revision that references a
+  #    secret with zero versions fails to start, and the error points at the revision rather than at
+  #    the empty secret. Catching it here turns a confusing rollout failure into a clear message.
+  # ---------------------------------------------------------------------------
+  - id: "verify-secrets"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        PREFIX="notarist-${_ENVIRONMENT}"
+        MISSING=0
+
+        for s in postgres-password app-encryption-key app-encryption-salt qdrant-api-key jwt-private-key jwt-public-key; do
+          SECRET="$${PREFIX}-$${s}"
+          COUNT=$(gcloud secrets versions list "$${SECRET}" \
+                    --filter="state=enabled" --format="value(name)" \
+                    --project="${PROJECT_ID}" 2>/dev/null | wc -l || echo 0)
+          if [ "$${COUNT}" -eq 0 ]; then
+            echo "MISSING VALUE: $${SECRET} exists but has no enabled version."
+            MISSING=1
+          else
+            echo "ok: $${SECRET}"
+          fi
+        done
+
+        if [ "$${MISSING}" -eq 1 ]; then
+          echo ""
+          echo "Populate the secret(s) above before deploying:"
+          echo "  printf '%s' \"<value>\" | gcloud secrets versions add <secret> --data-file=- --project=${PROJECT_ID}"
+          exit 1
+        fi
+    waitFor: ["-"] # No dependency — run in parallel with the build.
+
+  # ---------------------------------------------------------------------------
+  # 4. Terraform plan. Infrastructure drift is surfaced on every deploy, but NOT applied
+  #    automatically — see the note on the apply step.
+  # ---------------------------------------------------------------------------
+  - id: "terraform-plan"
+    name: "hashicorp/terraform:1.9"
+    dir: "terraform/environments/${_ENVIRONMENT}"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        set -eu
+        terraform init -input=false
+        terraform plan -input=false -lock-timeout=5m -out=tfplan
+        echo "--- plan summary ---"
+        terraform show -no-color tfplan | head -100
+    waitFor: ["verify-secrets"]
+
+  # ---------------------------------------------------------------------------
+  # 5. Terraform apply — GATED.
+  #
+  #    Auto-applying infrastructure on every push is how a routine code deploy silently deletes a
+  #    bucket. Terraform runs on demand (_AUTO_APPLY=true, normally only from a dedicated infra
+  #    trigger); the ordinary code pipeline plans, shows the diff, and stops.
+  # ---------------------------------------------------------------------------
+  - id: "terraform-apply"
+    name: "hashicorp/terraform:1.9"
+    dir: "terraform/environments/${_ENVIRONMENT}"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        set -eu
+        if [ "$${_AUTO_APPLY:-false}" != "true" ]; then
+          echo "Skipping terraform apply (_AUTO_APPLY is not 'true')."
+          echo "Infrastructure changes are applied deliberately, not as a side effect of a code deploy."
+          exit 0
+        fi
+        terraform init -input=false
+        terraform apply -input=false -auto-approve -lock-timeout=5m tfplan
+    waitFor: ["terraform-plan"]
+
+  # ---------------------------------------------------------------------------
+  # 6. Deploy the new image to Cloud Run.
+  #
+  #    Only the IMAGE is set here. Everything else about the service (env vars, secrets, scaling,
+  #    volume mounts) is owned by Terraform — which is why the cloudrun module ignores changes to
+  #    the image. The two never fight over the same field.
+  # ---------------------------------------------------------------------------
+  - id: "deploy"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        SERVICE="${_SERVICE:-notarist-${_ENVIRONMENT}-api}"
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/notarist-backend:${SHORT_SHA}"
+
+        gcloud run deploy "$${SERVICE}" \
+          --image="$${IMAGE}" \
+          --region="${_REGION}" \
+          --project="${PROJECT_ID}" \
+          --quiet
+
+        URL=$(gcloud run services describe "$${SERVICE}" \
+                --region="${_REGION}" --project="${PROJECT_ID}" \
+                --format="value(status.url)")
+        echo "Deployed $${SERVICE} → $${URL}"
+    waitFor: ["docker-build", "terraform-apply"]
+
+  # ---------------------------------------------------------------------------
+  # 7. Smoke test. A deploy that reports success but serves 503 is not a success.
+  # ---------------------------------------------------------------------------
+  - id: "smoke-test"
+    name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        SERVICE="${_SERVICE:-notarist-${_ENVIRONMENT}-api}"
+        URL=$(gcloud run services describe "$${SERVICE}" \
+                --region="${_REGION}" --project="${PROJECT_ID}" \
+                --format="value(status.url)")
+
+        echo "Probing $${URL}/actuator/health"
+        for i in $(seq 1 30); do
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "$${URL}/actuator/health" || echo 000)
+          if [ "$${CODE}" = "200" ]; then
+            echo "Healthy after $${i} attempt(s)."
+            exit 0
+          fi
+          echo "  attempt $${i}: HTTP $${CODE}"
+          sleep 10
+        done
+
+        echo "Service did not become healthy. Recent logs:"
+        gcloud run services logs read "$${SERVICE}" \
+          --region="${_REGION}" --project="${PROJECT_ID}" --limit=50 || true
+        exit 1
+    waitFor: ["deploy"]

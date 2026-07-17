@@ -10,13 +10,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Validates that Flyway (PostgreSQL) and Liquibase (Oracle) migrations are consistent.
+ * Validates that the PostgreSQL Flyway migration state is consistent.
  *
  * Checks performed:
  *   1. Flyway: no FAILED or PENDING migrations in flyway_schema_history_search
- *   2. Liquibase: no pending changesets in databasechangelog (Oracle 19C)
- *   3. Schema existence: expected tables present in both databases
- *   4. Cross-schema: chunk_index columns match expected contract (explicit, no SELECT *)
+ *   2. Schema existence: expected tables present
+ *   3. chunk_index columns match expected contract (explicit, no SELECT *)
+ *
+ * There is no second migrator to cross-check any more: Oracle/Liquibase is gone and Flyway owns
+ * the single database end to end.
  *
  * Non-fatal: returns MigrationReport with violations list; never throws.
  * Callers should block ingestion if hasCriticalViolations() is true.

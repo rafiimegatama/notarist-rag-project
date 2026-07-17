@@ -1,6 +1,11 @@
 spring:
   application:
     name: notarist-rag
+  # Bounds how long graceful shutdown waits for in-flight work (HTTP + @Scheduled) to finish
+  # before the context is forced down. Keep < Cloud Run's SIGTERM→SIGKILL grace (~10s default,
+  # raise via the service's `timeoutSeconds`/termination settings).
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:25s}
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
   jackson:
@@ -8,19 +13,26 @@ spring:
     time-zone: UTC
     serialization:
       write-dates-as-timestamps: false
+  # Flyway is configured programmatically by FlywaySearchConfig (notarist-infra), which owns the
+  # single PostgreSQL database and calls migrate() on startup. Spring Boot's Flyway auto-config is
+  # disabled so it cannot open a SECOND Flyway against the same database with a different history
+  # table. There is no longer a Liquibase/Oracle half to keep in step: one database, one migrator.
   flyway:
     enabled: false
-  liquibase:
-    enabled: ${LIQUIBASE_ENABLED:false}
-    change-log: classpath:/db/oracle/changelog/db.changelog-master.yaml
   jpa:
     hibernate:
       ddl-auto: none
-    database-platform: org.hibernate.dialect.OracleDialect
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     open-in-view: false
 
 server:
-  port: ${SERVER_PORT:8080}
+  # Cloud Run injects the listen port as $PORT and routes all ingress to it. Honour PORT first,
+  # then SERVER_PORT for non-Cloud-Run runs, then 8080. Binding anything else on Cloud Run makes
+  # the container fail its startup probe.
+  port: ${PORT:${SERVER_PORT:8080}}
+  # Graceful shutdown: Cloud Run sends SIGTERM, then SIGKILL ~10s later. Let in-flight HTTP
+  # requests drain instead of being cut mid-response during scale-in / new revisions.
+  shutdown: graceful
 
 management:
   endpoints:
@@ -36,46 +48,79 @@ management:
         enabled: ${PROMETHEUS_ENABLED:true}
 
 notarist:
-  security:
+  # JWT settings — bound by JwtService via notarist.auth.jwt.* (@Value).
+  # TTLs are in SECONDS to match JwtService / AuthenticateUserHandler / RefreshTokenHandler.
+  auth:
     jwt:
       issuer: ${JWT_ISSUER:notarist-rag}
-      access-token-ttl-minutes: ${JWT_ACCESS_TOKEN_TTL_MINUTES:15}
-      refresh-token-ttl-days: ${JWT_REFRESH_TOKEN_TTL_DAYS:7}
-      private-key-path: ${JWT_PRIVATE_KEY_PATH:file:./keys/notarist-private.pem}
-      public-key-path: ${JWT_PUBLIC_KEY_PATH:file:./keys/notarist-public.pem}
+      # Plain filesystem paths (no file: prefix) — JwtService reads them via Files.readString(Paths.get(...)).
+      private-key-path: ${JWT_PRIVATE_KEY_PATH:./keys/notarist-private.pem}
+      public-key-path: ${JWT_PUBLIC_KEY_PATH:./keys/notarist-public.pem}
+      access-token-ttl-seconds: ${JWT_ACCESS_TOKEN_TTL_SECONDS:900}
+      refresh-token-ttl-seconds: ${JWT_REFRESH_TOKEN_TTL_SECONDS:604800}
+  security:
     encryption:
       key: ${APP_ENCRYPTION_KEY}
       salt: ${APP_ENCRYPTION_SALT}
 
   database:
-    oracle:
-      url: ${ORACLE_URL:jdbc:oracle:thin:@localhost:1521/NOTARISTDB}
-      username: ${ORACLE_USER:notarist_app}
-      password: ${ORACLE_PASSWORD}
-      pool-max: ${ORACLE_POOL_MAX:10}
-      pool-min: ${ORACLE_POOL_MIN:2}
+    # The one and only datasource — Supabase PostgreSQL. Bound by PostgresProperties and built
+    # into the @Primary HikariCP pool by PostgresConnectionConfig, which backs both JPA and every
+    # JdbcTemplate path. Pool bounds are sized for Cloud Run: keep pool-max * max-instances under
+    # the Supabase connection ceiling, or route through the Supabase transaction pooler.
     postgres:
-      url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/notarist_search}
+      url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/notarist}
       username: ${POSTGRES_USER:notarist_app}
       password: ${POSTGRES_PASSWORD}
       pool-max: ${POSTGRES_POOL_MAX:10}
+      connection-timeout-ms: ${POSTGRES_CONNECTION_TIMEOUT_MS:30000}
+      idle-timeout-ms: ${POSTGRES_IDLE_TIMEOUT_MS:600000}
+      max-lifetime-ms: ${POSTGRES_MAX_LIFETIME_MS:1800000}
+
+  # Ingest datasource (IngestModuleConfig reads notarist.postgres.*). Aligned to the SAME database
+  # and credentials as notarist.database.postgres.* above to remove namespace drift.
+  postgres:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/notarist}
+    username: ${POSTGRES_USER:notarist_app}
+    password: ${POSTGRES_PASSWORD}
+    pool:
+      max-size: ${POSTGRES_POOL_MAX:10}
 
   storage:
     qdrant:
       url: ${QDRANT_URL:http://localhost:6333}
       api-key: ${QDRANT_API_KEY:}
       collection: ${QDRANT_COLLECTION:notarist_chunks}
-    minio:
-      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
-      access-key: ${MINIO_ACCESS_KEY:minioadmin}
-      secret-key: ${MINIO_SECRET_KEY:minioadmin}
-      upload-url-ttl-minutes: ${MINIO_UPLOAD_URL_TTL_MINUTES:15}
-      buckets:
-        raw: ${MINIO_BUCKET_RAW:notarist-raw}
-        ocr: ${MINIO_BUCKET_OCR:notarist-ocr}
-        processed: ${MINIO_BUCKET_PROCESSED:notarist-processed}
-        chunk: ${MINIO_BUCKET_CHUNK:notarist-chunk}
-        export: ${MINIO_BUCKET_EXPORT:notarist-export}
+    # Google Cloud Storage — single bucket, stage-prefixed keys (notarist-raw/…, notarist-ocr/…).
+    # No endpoint/access-key/secret-key: authentication is Application Default Credentials, i.e.
+    # the Cloud Run runtime service account (Workload Identity). Nothing here points at localhost.
+    gcs:
+      # Bucket is REQUIRED and has no default — GCS bucket names are globally unique, so a shipped
+      # default would either collide or silently write to someone else's bucket. Fail loud if unset.
+      bucket: ${GCS_BUCKET}
+      # Optional. On Cloud Run the project is resolved from the metadata server / ADC; set it only
+      # when running against ADC that carries no default project.
+      project-id: ${GOOGLE_CLOUD_PROJECT:}
+      # Optional service-account key file for LOCAL/CI signing. Leave unset on Cloud Run — signing
+      # goes through ADC (see signing-service-account) with no private key on disk.
+      credentials-path: ${GCS_CREDENTIALS_PATH:}
+      # Optional. The service account whose identity signs V4 upload URLs via the IAM signBlob API.
+      # Set this to the Cloud Run runtime SA (granted roles/iam.serviceAccountTokenCreator on
+      # itself) so the app can mint signed URLs without ever holding a private key. Unset ⇒ sign
+      # with whatever ADC/key-file credentials are already in use.
+      signing-service-account: ${GCS_SIGNING_SERVICE_ACCOUNT:}
+      # LOCAL/CI ONLY. Set to a GCS emulator (fake-gcs-server), e.g. http://localhost:4443, and the
+      # client talks to it with NO credentials — which is what lets the ingestion pipeline run with
+      # no ADC and no Google project. Same variable name Google's own client libraries use, and the
+      # one the OCR/NER sidecars already read, so a single export moves the whole stack.
+      # Uploads become UNSIGNED POSTs in this mode (fake-gcs implements the JSON API only).
+      # NEVER set this in production: it disables credentials entirely.
+      emulator-host: ${STORAGE_EMULATOR_HOST:}
+      # Region for auto-created buckets only (see auto-create-bucket).
+      location: ${GCS_LOCATION:US}
+      # Verify-or-create the bucket at startup. In production keep this false: buckets are
+      # provisioned by Terraform/gcloud and the runtime SA holds only object-level access.
+      auto-create-bucket: ${GCS_AUTO_CREATE_BUCKET:false}
 
   ingestion:
     queue:
@@ -103,6 +148,112 @@ notarist:
       enabled: true
       min-citation-count: 1
 
+  # ── Provider-agnostic LLM runtime ────────────────────────────────────────────────
+  # Application → InferencePort → ProviderRegistry → {LLM, Embedding, Reranker} Provider.
+  # Swapping a backend (Ollama → vLLM/OpenAI/Gemini/Anthropic) is an env change + restart;
+  # no business-logic code changes. See deploy/runtime/README.md.
+  # Provider and MODEL are separate axes (Phase 4). Changing the model is a config-only change:
+  #   LLM_PROVIDER=ollama   LLM_MODEL=qwen3:14b
+  #   EMBED_PROVIDER=ollama EMBED_MODEL=bge-m3
+  #   RERANK_PROVIDER=crossencoder RERANK_MODEL=bge-reranker-v2-m3
+  runtime:
+    llm:
+      # ollama (implemented). Future: vllm | openai | gemini | anthropic | openrouter | tensorrt.
+      provider: ${LLM_PROVIDER:ollama}
+      # Model tag served by the provider. Blank ⇒ fall back to ModelRegistry's default.
+      model: ${LLM_MODEL:qwen3:14b}
+      # HTTP timeouts for the LLM provider (ms). read-timeout bounds a full non-streaming
+      # generation and the inter-token gap while streaming — scale with model size / GPU speed.
+      connect-timeout-ms: ${LLM_CONNECT_TIMEOUT_MS:5000}
+      read-timeout-ms: ${LLM_READ_TIMEOUT_MS:120000}
+      write-timeout-ms: ${LLM_WRITE_TIMEOUT_MS:10000}
+    embedding:
+      # ollama (bge-m3 served by Ollama) | sidecar (dedicated bge-m3 HTTP service).
+      provider: ${EMBED_PROVIDER:ollama}
+      model: ${EMBED_MODEL:bge-m3}
+    reranker:
+      # none (default — keep retrieval order) | crossencoder (bge-reranker-v2-m3 HTTP service).
+      provider: ${RERANK_PROVIDER:none}
+      model: ${RERANK_MODEL:bge-reranker-v2-m3}
+    ocr:
+      # The OCR branch of the same RuntimeRegistry. Selection key deliberately shaped like its
+      # siblings above, so all four runtime capabilities are configured identically and nobody has
+      # to remember which one spells it differently.
+      #
+      #   RuntimeRegistry
+      #     ├── OCR Registry        ← OCR_PROVIDER     ← this key
+      #     ├── LLM Registry        ← LLM_PROVIDER
+      #     ├── Embedding Registry  ← EMBED_PROVIDER
+      #     └── Reranker Registry   ← RERANK_PROVIDER
+      #
+      # paddle (implemented). Future: surya | gemini | mistral | azure | google-vision.
+      # A typo here fails STARTUP and lists the ids that ARE registered — it must never boot green
+      # and then dead-letter every document at the OCR stage.
+      provider: ${OCR_PROVIDER:paddle}
+
+  # ---------------------------------------------------------------------------
+  # OCR runtime settings (endpoint, timeout, retry, batching).
+  #
+  # Business logic depends only on OcrServicePort, so swapping engines is an env-var change and a
+  # restart — never a code change. To add an engine: implement OcrProvider, annotate @Component,
+  # give it a unique id(), add a providers.<id> block here, set OCR_PROVIDER=<id>.
+  # ---------------------------------------------------------------------------
+  ocr:
+    # Wall-clock budget for ONE document, across all retry attempts.
+    timeout-ms: ${OCR_TIMEOUT:120000}
+
+    # Probe the active engine at startup, so a bad endpoint appears in the boot log next to the
+    # config that caused it — not as a failed ingestion an hour later.
+    probe-on-startup: ${OCR_PROBE_ON_STARTUP:true}
+    # Default false on purpose: a slow-starting OCR sidecar must not crash-loop an app that can
+    # still serve auth, documents and search perfectly well without it.
+    fail-fast-on-unhealthy-provider: ${OCR_FAIL_FAST:false}
+
+    retry:
+      # Applied ONCE, in OcrRuntimeService, for every engine. Providers must not retry internally:
+      # policies would multiply (3 x 3 = 9 attempts) against an engine that is already overloaded.
+      # Only failures the provider marks RETRYABLE are retried — a corrupt PDF fails immediately
+      # and reaches the DLQ in seconds, where a human can see it.
+      max-attempts: ${OCR_RETRY_MAX_ATTEMPTS:3}
+      initial-backoff-ms: ${OCR_RETRY_INITIAL_BACKOFF_MS:1000}
+      max-backoff-ms: ${OCR_RETRY_MAX_BACKOFF_MS:15000}
+      multiplier: ${OCR_RETRY_MULTIPLIER:2.0}
+      # Without jitter, a batch of documents failing together retries in lockstep and re-saturates
+      # the engine in phase, forever.
+      jitter-factor: ${OCR_RETRY_JITTER:0.2}
+
+    batch:
+      enabled: ${OCR_BATCH_ENABLED:true}
+      # 0 = derive from DETECTED hardware (CUDA + VRAM via GpuAwarenessConfig), never from a GPU
+      # model name. The engine's own maxBatchSize always clamps it. On a 16GB card this resolves to
+      # 8; on CPU-only, to 1-2. Set a value only to override a measurement.
+      max-size: ${OCR_BATCH_SIZE:0}
+
+    providers:
+      paddle:
+        # REQUIRED. Deliberately NO localhost default: a default that works on a laptop and dies
+        # silently in a container is a worse failure than a clear startup error. Point this at
+        # wherever PaddleOCR serving actually runs — a local GPU box, a container, a Cloud Run
+        # service. OCR_BASE_URL is accepted as a fallback for existing deployments.
+        endpoint: ${OCR_ENDPOINT:${OCR_BASE_URL:}}
+        path: ${OCR_PADDLE_PATH:/predict/ocr_system}
+
+      # Future engines. Each needs an OcrProvider implementation before its config does anything;
+      # an endpoint here with no matching provider class is inert.
+      # surya:
+      #   endpoint: ${SURYA_OCR_ENDPOINT:}
+      # gemini:
+      #   endpoint: ${GEMINI_OCR_ENDPOINT:}
+      #   api-key: ${GEMINI_API_KEY:}          # from Secret Manager — never commit a key
+      # mistral:
+      #   endpoint: ${MISTRAL_OCR_ENDPOINT:}
+      #   api-key: ${MISTRAL_API_KEY:}
+      # azure:
+      #   endpoint: ${AZURE_OCR_ENDPOINT:}
+      #   api-key: ${AZURE_OCR_KEY:}
+      # google-vision:
+      #   endpoint: ${GOOGLE_VISION_ENDPOINT:https://vision.googleapis.com}
+
   sidecar:
     ocr:
       base-url: ${OCR_BASE_URL:http://localhost:8081}
@@ -116,6 +267,9 @@ notarist:
     ollama:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       timeout-ms: ${OLLAMA_TIMEOUT_MS:120000}
+    embedding:
+      base-url: ${EMBEDDING_BASE_URL:http://localhost:8084}
+      timeout-ms: ${EMBEDDING_TIMEOUT_MS:15000}
 
   observability:
     correlation-id-header: X-Correlation-ID

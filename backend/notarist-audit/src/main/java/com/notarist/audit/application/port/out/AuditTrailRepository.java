@@ -9,7 +9,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Append-only audit trail persistence — Oracle NOTARIST_SEC.AUDIT_TRAIL. */
+/** Append-only audit trail persistence — PostgreSQL `audit_trail` (Flyway V7).
+ *  Not Oracle: AUTH_LOGIN_FAILURE has no tenant identity, which the fail-closed Oracle VPD
+ *  policy cannot express. The Oracle NOTARIST_SEC.AUDIT_TRAIL table is retired. */
 public interface AuditTrailRepository {
     void append(AuditEntry entry);
     Optional<AuditEntry> findById(UUID auditId);

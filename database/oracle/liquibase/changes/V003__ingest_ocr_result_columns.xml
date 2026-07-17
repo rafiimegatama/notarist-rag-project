@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <!-- ============================================================
+         NOTARIST RAG Platform — Oracle 19C Ingest Schema
+         Liquibase V003 — OCR result persistence on INGESTION_JOB
+
+         The OCR stage produces a confidence score and the MinIO object
+         key of the extracted text. Both must survive between scheduler
+         executions so the NER and CHUNK stages can consume the real
+         OCR output instead of reconstructing it.
+         ============================================================ -->
+
+    <changeSet id="V003-01" author="notarist-ingest">
+        <comment>Persist OCR confidence and extracted-text object key on INGESTION_JOB</comment>
+
+        <addColumn tableName="INGESTION_JOB" schemaName="NOTARIST">
+            <column name="OCR_CONFIDENCE" type="BINARY_FLOAT">
+                <constraints nullable="true"/>
+            </column>
+            <column name="OCR_OBJECT_KEY" type="VARCHAR2(1000)">
+                <constraints nullable="true"/>
+            </column>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

@@ -41,9 +41,9 @@ import java.util.UUID;
  *      migrations this table ships in.
  * 7-year retention is unaffected by the engine choice.
  *
- * Uses the shared HikariCP-backed "postgresJdbcTemplate" bean from
- * notarist-infra PostgresConnectionConfig — same convention as
- * auth SessionTokenRepositoryImpl and ingest IngestionQueueRepositoryImpl.
+ * Uses the dedicated HikariCP-backed "auditJdbcTemplate" bean from
+ * notarist-infra AuditConnectionConfig — a small, autocommit pool separate from the business pool,
+ * so a saturated business pool cannot starve a fail-closed audit write (see that class).
  *
  * All columns are listed explicitly; no SELECT * (project rule 7/8).
  */
@@ -76,15 +76,15 @@ public class AuditTrailRepositoryImpl implements AuditTrailRepository {
             WHERE audit_id = ?
             """;
 
-    private final JdbcTemplate postgresJdbcTemplate;
+    private final JdbcTemplate auditJdbcTemplate;
 
-    public AuditTrailRepositoryImpl(@Qualifier("postgresJdbcTemplate") JdbcTemplate postgresJdbcTemplate) {
-        this.postgresJdbcTemplate = postgresJdbcTemplate;
+    public AuditTrailRepositoryImpl(@Qualifier("auditJdbcTemplate") JdbcTemplate auditJdbcTemplate) {
+        this.auditJdbcTemplate = auditJdbcTemplate;
     }
 
     @Override
     public void append(AuditEntry entry) {
-        postgresJdbcTemplate.update(
+        auditJdbcTemplate.update(
                 SQL_APPEND,
                 entry.getAuditId() != null ? entry.getAuditId() : UUID.randomUUID(),
                 entry.getCorrelationId() != null ? entry.getCorrelationId().value() : null,
@@ -107,7 +107,7 @@ public class AuditTrailRepositoryImpl implements AuditTrailRepository {
 
     @Override
     public Optional<AuditEntry> findById(UUID auditId) {
-        return postgresJdbcTemplate.query(SQL_FIND_BY_ID, ENTRY_ROW_MAPPER, auditId)
+        return auditJdbcTemplate.query(SQL_FIND_BY_ID, ENTRY_ROW_MAPPER, auditId)
                 .stream()
                 .findFirst();
     }
@@ -126,14 +126,14 @@ public class AuditTrailRepositoryImpl implements AuditTrailRepository {
                 + " FROM audit_trail" + where
                 + " ORDER BY created_at DESC LIMIT ? OFFSET ?";
 
-        return postgresJdbcTemplate.query(sql, ENTRY_ROW_MAPPER, args.toArray());
+        return auditJdbcTemplate.query(sql, ENTRY_ROW_MAPPER, args.toArray());
     }
 
     @Override
     public long countByFilter(AuditFilter filter) {
         List<Object> args = new ArrayList<>();
         String where = buildWhere(filter, args);
-        Long count = postgresJdbcTemplate.queryForObject(
+        Long count = auditJdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_trail" + where, Long.class, args.toArray());
         return count == null ? 0L : count;
     }

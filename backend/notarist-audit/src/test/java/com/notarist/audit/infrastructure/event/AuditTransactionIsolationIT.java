@@ -1,6 +1,8 @@
 package com.notarist.audit.infrastructure.event;
 
 import com.notarist.core.api.audit.AuditEventPayload;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.DisplayName;
@@ -15,7 +17,6 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,15 +34,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * of the business transaction that produced it.
  *
  * <p>The regulated access trail is written by a plain {@code @EventListener} on the caller's thread.
- * Since the Oracle→PostgreSQL migration, the audit store is the SAME datasource as the business tables
- * (see {@code PostgresConnectionConfig}: "there is no second database"), so the audit INSERT enlists in
- * any active caller transaction. The production path {@code loadForCaller(...)} publishes
- * {@code SECURITY_ACCESS_DENIED} and then throws a not-found exception, rolling that transaction back —
- * which, without an independent audit transaction, discards the very record a notary office must keep.
+ * Independence from the caller's transaction now comes from the dedicated, autocommit audit datasource
+ * ({@code AuditConnectionConfig} / {@code auditJdbcTemplate}) — a separate pool, enlisted in no caller
+ * transaction, so the INSERT commits immediately. The production path {@code loadForCaller(...)}
+ * publishes {@code SECURITY_ACCESS_DENIED} and then throws a not-found exception, rolling that
+ * transaction back; the audit row has already committed on the audit connection and stays on disk.
  *
- * <p>This models exactly that path: audit-then-throw inside {@code @Transactional}, then assert the row
- * is on disk. It fails (count 0) against the enlisted write and passes (count 1) once the audit records
- * in its own transaction.
+ * <p>This models exactly that path: audit-then-throw inside {@code @Transactional} (bound to the
+ * business pool), then assert the row is on disk. It would fail (count 0) if the audit write shared the
+ * caller's transaction, and passes (count 1) because the audit datasource is independent.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 class AuditTransactionIsolationIT {
@@ -51,8 +52,6 @@ class AuditTransactionIsolationIT {
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) throws Exception {
         pg = EmbeddedPostgres.start();
-        registry.add("spring.datasource.url", () -> pg.getJdbcUrl("postgres", "postgres"));
-        registry.add("spring.datasource.username", () -> "postgres");
         registry.add("spring.flyway.enabled", () -> "true");
         registry.add("spring.flyway.locations", () -> "classpath:db/postgres/flyway");
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "none");
@@ -61,6 +60,16 @@ class AuditTransactionIsolationIT {
     @AfterAll
     static void stop() throws Exception {
         if (pg != null) pg.close();
+    }
+
+    private static HikariDataSource pool(String name, boolean autoCommit) {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(pg.getJdbcUrl("postgres", "postgres"));
+        config.setUsername("postgres");
+        config.setMaximumPoolSize(2);
+        config.setAutoCommit(autoCommit);
+        config.setPoolName(name);
+        return new HikariDataSource(config);
     }
 
     @SpringBootConfiguration
@@ -73,10 +82,27 @@ class AuditTransactionIsolationIT {
     })
     @Import(AuditEventListener.class)
     static class ItConfig {
-        /** The audit repository injects a JdbcTemplate under this exact qualifier. */
-        @Bean("postgresJdbcTemplate")
+        // Business pool: @Primary, backs the caller's @Transactional and the verification query.
+        @Bean("postgresDataSource")
         @Primary
-        JdbcTemplate postgresJdbcTemplate(DataSource ds) {
+        DataSource postgresDataSource() {
+            return pool("BusinessPool-IsolationIT", true);
+        }
+
+        @Bean("postgresJdbcTemplate")
+        JdbcTemplate postgresJdbcTemplate(@Qualifier("postgresDataSource") DataSource ds) {
+            return new JdbcTemplate(ds);
+        }
+
+        // Audit pool: the separate autocommit datasource the audit repository writes on — enlisted in
+        // no caller transaction, so its INSERT commits independently of the business rollback.
+        @Bean("auditDataSource")
+        DataSource auditDataSource() {
+            return pool("AuditPool-IsolationIT", true);
+        }
+
+        @Bean("auditJdbcTemplate")
+        JdbcTemplate auditJdbcTemplate(@Qualifier("auditDataSource") DataSource ds) {
             return new JdbcTemplate(ds);
         }
 

@@ -3,6 +3,7 @@ package com.notarist.infra.gcs;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ImpersonatedCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
+import com.google.cloud.NoCredentials;
 import com.google.cloud.http.HttpTransportOptions;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
@@ -11,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -43,18 +45,47 @@ public class GcsClientConfig {
     private static final List<String> STORAGE_RW_SCOPE =
             List.of("https://www.googleapis.com/auth/devstorage.read_write");
 
+    // @Lazy: the Storage client resolves ADC/service-account credentials at creation, which throws
+    // if none are present. Deferring creation to first actual GCS use lets the app boot (and serve
+    // DB-backed endpoints) in environments without GCS credentials; the GcsBucketProvisioner and
+    // health indicator surface any real GCS outage loudly on first touch. Every injection point of
+    // Storage is also @Lazy so no eager consumer forces this open at startup.
     @Bean
+    @Lazy
     public Storage storage(GcsProperties props) throws IOException {
-        GoogleCredentials credentials = resolveCredentials(props);
-
         HttpTransportOptions transport = HttpTransportOptions.newBuilder()
                 .setConnectTimeout(props.connectTimeoutMs())
                 .setReadTimeout(props.readTimeoutMs())
                 .build();
 
         StorageOptions.Builder builder = StorageOptions.newBuilder()
-                .setCredentials(credentials)
                 .setTransportOptions(transport);
+
+        if (props.emulatorEnabled()) {
+            // Emulator: point the JSON API at fake-gcs and resolve NO credentials.
+            //
+            // This is the whole reason the branch exists. resolveCredentials() calls
+            // GoogleCredentials.getApplicationDefault(), which THROWS when no ADC is present, and
+            // because that happens inside this @Lazy bean the failure surfaced as a degraded GCS on
+            // first touch — the pipeline could never read or write an object without a Google login.
+            // An emulator has no auth to satisfy, so asking for credentials at all is wrong.
+            //
+            // setHost covers every JSON operation the pipeline actually performs (exists, read,
+            // copy, write). Signing is the one thing it cannot cover — see
+            // GcsDocumentStorageAdapter.generateUploadUrl.
+            builder.setHost(props.emulatorBaseUrl())
+                   .setCredentials(NoCredentials.getInstance())
+                   .setProjectId(props.projectId() == null || props.projectId().isBlank()
+                           ? "notarist-local"
+                           : props.projectId());
+
+            log.warn("GCS client in EMULATOR mode host={} bucket={} — no credentials, uploads are "
+                            + "UNSIGNED. Never set STORAGE_EMULATOR_HOST in production.",
+                    props.emulatorBaseUrl(), props.bucket());
+            return builder.build().getService();
+        }
+
+        builder.setCredentials(resolveCredentials(props));
 
         if (props.projectId() != null && !props.projectId().isBlank()) {
             builder.setProjectId(props.projectId());

@@ -1,5 +1,6 @@
 package com.notarist.kase.infrastructure.persistence.postgres;
 
+import com.notarist.core.domain.valueobject.DocumentId;
 import com.notarist.kase.application.port.out.BundleRepository;
 import com.notarist.kase.domain.model.Bundle;
 import com.notarist.kase.domain.valueobject.BundleId;
@@ -66,5 +67,14 @@ public class BundleRepositoryImpl implements BundleRepository {
         return jpaRepository.findByCaseIdOrderByCreatedAtAsc(caseId.value().toString()).stream()
                 .map(mapper::toDomain)
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Bundle> findByDocumentId(DocumentId documentId) {
+        rlsContextApplier.applyIfPresent(entityManager);
+        return jpaRepository.findByDocumentId(documentId.value().toString()).stream()
+                .findFirst()
+                .map(mapper::toDomain);
     }
 }

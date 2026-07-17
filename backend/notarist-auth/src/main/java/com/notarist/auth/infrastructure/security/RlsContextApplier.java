@@ -6,7 +6,6 @@ import org.hibernate.Session;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.PreparedStatement;
@@ -26,15 +25,23 @@ import java.sql.PreparedStatement;
  * discards them at commit or rollback — a pooled connection cannot carry one caller's tenant into
  * the next borrower's query. Outside a transaction the write would be a no-op, which the fail-closed
  * policy would turn into "zero rows", so these methods refuse to run there rather than mislead.
+
+ * <p><b>There is deliberately no clear-on-completion hook.</b> One used to be registered on
+ * {@code beforeCompletion()}. Spring commits as triggerBeforeCommit -> triggerBeforeCompletion ->
+ * doCommit, and Hibernate flushes INSERT/UPDATE in doCommit, so the clear blanked
+ * {@code notarist.tenant_id} BEFORE the write was flushed and the policy's WITH CHECK rejected it
+ * ("new row violates row-level security policy"). It broke writes only — reads flush inside the
+ * method — and only once RLS was genuinely enforced, since a BYPASSRLS role skips policies entirely
+ * and hid it. It was never needed: {@code notarist_set_identity()} uses {@code set_config(..., TRUE)},
+ * so PostgreSQL drops the setting at commit or rollback by itself.
  */
 @Component("authRlsContextApplier")
 public class RlsContextApplier {
 
     private static final Logger log = LoggerFactory.getLogger(RlsContextApplier.class);
 
-    private static final String SET_IDENTITY_SQL   = "SELECT notarist_set_identity(?, ?, ?)";
+    private static final String SET_IDENTITY_SQL = "SELECT notarist_set_identity(?, ?, ?)";
     private static final String SET_SYSTEM_SQL     = "SELECT notarist_set_system_identity()";
-    private static final String CLEAR_IDENTITY_SQL = "SELECT notarist_clear_identity()";
 
     /**
      * Marks the session as a trusted system session, exempt from RLS tenant filtering.
@@ -56,7 +63,6 @@ public class RlsContextApplier {
             }
         });
 
-        registerClearOnCompletion(entityManager);
     }
 
     /**
@@ -82,7 +88,6 @@ public class RlsContextApplier {
             }
         });
 
-        registerClearOnCompletion(entityManager);
     }
 
     public void applyIfPresent(EntityManager entityManager) {
@@ -100,7 +105,6 @@ public class RlsContextApplier {
                 }
             });
 
-            registerClearOnCompletion(entityManager);
         });
     }
 
@@ -114,25 +118,4 @@ public class RlsContextApplier {
         return false;
     }
 
-    /**
-     * Belt-and-braces clear. PostgreSQL already drops a transaction-local setting at commit or
-     * rollback, so unlike the Oracle original this is not the load-bearing cleanup — it just keeps
-     * the identity from lingering if the connection is reused within the same transaction scope.
-     */
-    private void registerClearOnCompletion(EntityManager entityManager) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void beforeCompletion() {
-                try {
-                    entityManager.unwrap(Session.class).doWork(connection -> {
-                        try (PreparedStatement ps = connection.prepareStatement(CLEAR_IDENTITY_SQL)) {
-                            ps.execute();
-                        }
-                    });
-                } catch (Exception e) {
-                    log.warn("Tenant identity clear failed: {}", e.getMessage());
-                }
-            }
-        });
-    }
 }

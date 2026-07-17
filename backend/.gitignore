@@ -4,3 +4,8 @@ build/
 /out/
 *.iml
 .idea/
+
+# Local runtime secrets — never commit (Sprint 9 Supabase bootRun env)
+.env.supabase
+.env.local
+keys/*.pem

@@ -18,5 +18,8 @@ dependencies {
     // resources live in notarist-infra, so the test classpath pulls them in and runs the whole
     // Flyway chain (V1..V12) against the container — the same schema production migrates.
     testImplementation(libs.testcontainers.postgresql)
+    // Embedded PostgreSQL (a real server binary, no Docker) so the event-orchestration integration
+    // test can execute in environments where Docker is unavailable.
+    testImplementation(libs.embedded.postgres)
     testImplementation(project(":notarist-infra"))
 }

@@ -6,7 +6,6 @@ import org.hibernate.Session;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.PreparedStatement;
@@ -31,8 +30,7 @@ public class RlsContextApplier {
 
     private static final Logger log = LoggerFactory.getLogger(RlsContextApplier.class);
 
-    private static final String SET_IDENTITY_SQL   = "SELECT notarist_set_identity(?, ?, ?)";
-    private static final String CLEAR_IDENTITY_SQL = "SELECT notarist_clear_identity()";
+    private static final String SET_IDENTITY_SQL = "SELECT notarist_set_identity(?, ?, ?)";
 
     public void applyIfPresent(EntityManager entityManager) {
         VpdContextHolder.get().ifPresent(principal -> {
@@ -52,20 +50,18 @@ public class RlsContextApplier {
                 }
             });
 
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void beforeCompletion() {
-                    try {
-                        entityManager.unwrap(Session.class).doWork(connection -> {
-                            try (PreparedStatement ps = connection.prepareStatement(CLEAR_IDENTITY_SQL)) {
-                                ps.execute();
-                            }
-                        });
-                    } catch (Exception e) {
-                        log.warn("Tenant identity clear failed: {}", e.getMessage());
-                    }
-                }
-            });
+            // No clear hook, deliberately — one here broke every write in this module.
+            //
+            // Spring commits as: triggerBeforeCommit -> triggerBeforeCompletion -> doCommit, and
+            // Hibernate flushes INSERT/UPDATE in doCommit. A clear registered on beforeCompletion()
+            // therefore blanked notarist.tenant_id BEFORE the write was flushed, and the policy's
+            // WITH CHECK rejected it ("new row violates row-level security policy"). Reads were
+            // unaffected, so it only ever broke writes — and only once RLS was genuinely enforced,
+            // since a BYPASSRLS role skips the policy and hides it.
+            //
+            // The clear is unnecessary anyway: notarist_set_identity() uses set_config(..., TRUE),
+            // so PostgreSQL discards the setting at commit or rollback. Per V9, the leak "is closed
+            // by the database, not by remembering to call a cleanup hook."
         });
     }
 }

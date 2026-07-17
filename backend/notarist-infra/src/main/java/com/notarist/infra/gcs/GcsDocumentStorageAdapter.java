@@ -12,11 +12,14 @@ import com.notarist.infra.resilience.NotaristRetryPolicy;
 import com.notarist.ingest.application.port.out.DocumentStoragePort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.channels.Channels;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -54,7 +57,7 @@ public class GcsDocumentStorageAdapter implements DocumentStoragePort {
     private final DegradedModeRegistry    degradedMode;
 
     public GcsDocumentStorageAdapter(
-            Storage storage,
+            @Lazy Storage storage,
             GcsProperties props,
             GcsOperationMetrics metrics,
             NotaristRetryPolicy retryPolicy,
@@ -72,6 +75,10 @@ public class GcsDocumentStorageAdapter implements DocumentStoragePort {
         long startMs = System.currentTimeMillis();
 
         try {
+            if (props.emulatorEnabled()) {
+                return emulatorUploadUrl(objectKey, documentId, jobId, ttl, startMs);
+            }
+
             BlobInfo blobInfo = BlobInfo.newBuilder(BlobId.of(props.defaultBucket(), objectKey)).build();
 
             URL signedUrl = storage.signUrl(
@@ -100,6 +107,48 @@ public class GcsDocumentStorageAdapter implements DocumentStoragePort {
             log.error("GCS generateUploadUrl failed objectKey={}: {}", objectKey, e.getMessage(), e);
             throw new GcsIntegrationException("Failed to generate signed upload URL", e);
         }
+    }
+
+    /**
+     * Upload URL for a GCS emulator (fake-gcs-server). Unsigned, and a POST rather than a PUT.
+     *
+     * <p>Neither half of the production shape survives against an emulator, and neither can be
+     * worked around:
+     * <ul>
+     *   <li><b>Unsigned</b> — {@code signUrl} needs a {@code ServiceAccountSigner}, and emulator mode
+     *       resolves no credentials at all (that is the point of it). Signing is also meaningless to
+     *       a server that verifies nothing.</li>
+     *   <li><b>POST, not PUT</b> — fake-gcs-server implements the JSON API only. A PUT to the XML
+     *       endpoint that a V4 signed URL names returns 404, verified against fake-gcs 1.49.</li>
+     * </ul>
+     *
+     * <p>So the emulator client uploads with {@code POST <url>} and the raw bytes as the body. This
+     * is a development affordance: the URL is unguessable-by-signature nowhere and expires nowhere.
+     * Production is unaffected — it takes the signed-PUT branch above, and
+     * {@code emulatorEnabled()} can only be true if STORAGE_EMULATOR_HOST is deliberately set.
+     */
+    private SignedUploadUrl emulatorUploadUrl(
+            String objectKey, DocumentId documentId, JobId jobId, Duration ttl, long startMs) {
+
+        String uploadUrl = props.emulatorBaseUrl()
+                + "/upload/storage/v1/b/" + props.defaultBucket()
+                + "/o?uploadType=media&name="
+                + URLEncoder.encode(objectKey, StandardCharsets.UTF_8);
+
+        metrics.recordSignedUrlGenerated(System.currentTimeMillis() - startMs);
+        degradedMode.markHealthy(DegradedModeRegistry.ExternalService.GCS);
+
+        log.warn("GCS EMULATOR upload URL (unsigned, POST) objectKey={}", objectKey);
+
+        return new SignedUploadUrl(
+                uploadUrl,
+                objectKey,
+                Instant.now().plus(ttl),
+                Map.of("x-goog-meta-document-id", documentId.value().toString(),
+                       "x-goog-meta-job-id",      jobId.value().toString(),
+                       // The record carries no method field and the production contract is an
+                       // implicit PUT; say so explicitly rather than let a client guess wrong.
+                       "x-notarist-upload-method", "POST"));
     }
 
     @Override

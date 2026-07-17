@@ -69,10 +69,12 @@ public class IngestionJobRepositoryImpl implements IngestJobRepository {
     }
 
     @Override
-    public Optional<IngestionJob> findByChecksumAndTenantId(String checksumSha256, UUID tenantId) {
+    public List<IngestionJob> findAllByChecksumAndTenantId(String checksumSha256, UUID tenantId) {
         rlsContextApplier.applyPrincipalOrSystem(entityManager);
-        return jpaRepository.findByChecksumSha256AndTenantId(checksumSha256, tenantId.toString())
-                .map(this::toDomain);
+        return jpaRepository.findAllByChecksumSha256AndTenantId(checksumSha256, tenantId.toString())
+                .stream()
+                .map(this::toDomain)
+                .toList();
     }
 
     @Override

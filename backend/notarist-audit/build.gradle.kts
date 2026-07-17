@@ -10,4 +10,7 @@ dependencies {
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.archunit.junit5)
+    // Real PostgreSQL (embedded server binary, no Docker) to prove audit-write transaction isolation.
+    testImplementation(libs.embedded.postgres)
+    testImplementation(project(":notarist-infra"))
 }

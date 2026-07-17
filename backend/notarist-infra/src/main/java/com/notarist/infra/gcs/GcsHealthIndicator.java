@@ -5,6 +5,7 @@ import com.google.cloud.storage.Storage;
 import com.notarist.infra.resilience.DegradedModeRegistry;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,7 +20,7 @@ public class GcsHealthIndicator implements HealthIndicator {
     private final GcsProperties        props;
     private final DegradedModeRegistry degradedMode;
 
-    public GcsHealthIndicator(Storage storage, GcsProperties props, DegradedModeRegistry degradedMode) {
+    public GcsHealthIndicator(@Lazy Storage storage, GcsProperties props, DegradedModeRegistry degradedMode) {
         this.storage      = storage;
         this.props        = props;
         this.degradedMode = degradedMode;

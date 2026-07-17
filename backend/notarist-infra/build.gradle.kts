@@ -15,4 +15,5 @@ dependencies {
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.embedded.postgres)
 }

@@ -13,7 +13,14 @@ public interface IngestionJobJpaRepository extends JpaRepository<IngestionJobJpa
 
     Optional<IngestionJobJpaEntity> findByJobId(String jobId);
 
-    Optional<IngestionJobJpaEntity> findByChecksumSha256AndTenantId(String checksumSha256, String tenantId);
+    /**
+     * All jobs for a checksum, NOT an Optional. Checksum+tenant is not unique and cannot be: the
+     * duplicate rule deliberately permits re-ingesting a document whose previous job FAILED or went
+     * to the DLQ, so a second row with the same checksum is the expected outcome of that rule. An
+     * Optional finder then throws IncorrectResultSizeDataAccessException ("2 results were returned")
+     * on the NEXT upload of that checksum — i.e. the duplicate policy broke the duplicate check.
+     */
+    List<IngestionJobJpaEntity> findAllByChecksumSha256AndTenantId(String checksumSha256, String tenantId);
 
     List<IngestionJobJpaEntity> findByPipelineStatusAndTenantId(
             String pipelineStatus, String tenantId, Pageable pageable);

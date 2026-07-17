@@ -3,6 +3,8 @@ package com.notarist.kase.config;
 import com.notarist.kase.application.listener.IngestionOutcomeHandler;
 import com.notarist.kase.application.port.out.CaseRepository;
 import com.notarist.kase.application.port.out.DomainEventPublisher;
+import com.notarist.kase.application.port.out.TimelineRepository;
+import com.notarist.kase.infrastructure.observability.CaseMetrics;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -14,17 +16,17 @@ import org.springframework.context.annotation.Configuration;
  * up by the root EntityManagerFactory's {@code @EntityScan("com.notarist")}.
  *
  * <p>The one explicit bean is {@link IngestionOutcomeHandler}: it is a framework-free plain class (it
- * takes only ports), so it is wired here rather than annotated. It stays inert until the composition
- * root translates an ingest completion into a {@code DocumentIngestionOutcome} — a change to
- * notarist-ingest that is out of scope for this sprint — but the boundary bean exists now so nothing
- * is tempted to reach into a Case aggregate directly.
+ * takes only ports), so it is wired here rather than annotated. It is driven by
+ * {@code DocumentIngestionCompletedListener}, which resolves the owning case from the ingested
+ * document and hands it a {@code DocumentIngestionOutcome}.
  */
 @Configuration
 public class CaseModuleConfig {
 
     @Bean
     public IngestionOutcomeHandler ingestionOutcomeHandler(
-            CaseRepository caseRepository, DomainEventPublisher eventPublisher) {
-        return new IngestionOutcomeHandler(caseRepository, eventPublisher);
+            CaseRepository caseRepository, TimelineRepository timelineRepository,
+            DomainEventPublisher eventPublisher, CaseMetrics metrics) {
+        return new IngestionOutcomeHandler(caseRepository, timelineRepository, eventPublisher, metrics);
     }
 }

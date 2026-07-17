@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -37,7 +38,7 @@ public class GcsBucketProvisioner implements ApplicationRunner {
     private final DegradedModeRegistry degradedMode;
     private final String               location;
 
-    public GcsBucketProvisioner(Storage storage,
+    public GcsBucketProvisioner(@Lazy Storage storage,
                                 GcsProperties props,
                                 DegradedModeRegistry degradedMode,
                                 @Value("${notarist.storage.gcs.location:US}") String location) {
@@ -58,7 +59,14 @@ public class GcsBucketProvisioner implements ApplicationRunner {
                 return;
             }
 
-            if (!Boolean.TRUE.equals(props.autoCreateBucket())) {
+            // An emulator bucket has no other provisioner. Terraform does not manage fake-gcs, and
+            // auto-create-bucket ships as false (correctly — the Cloud Run SA holds objectAdmin, not
+            // storage.buckets.create). Requiring an extra flag to get a bucket that only this process
+            // can create makes a cold start need a manual step, so emulator mode implies create.
+            // Production is untouched: emulatorEnabled() is only true when STORAGE_EMULATOR_HOST is set.
+            boolean mayCreate = Boolean.TRUE.equals(props.autoCreateBucket()) || props.emulatorEnabled();
+
+            if (!mayCreate) {
                 degradedMode.markDegraded(DegradedModeRegistry.ExternalService.GCS,
                         "bucket missing: " + bucketName);
                 log.error("GCS bucket MISSING: {} and auto-create is disabled — provision it "

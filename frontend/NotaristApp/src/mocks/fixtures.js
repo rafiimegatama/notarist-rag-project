@@ -86,6 +86,36 @@ export const MOCK_DOCUMENTS = {
   ],
 };
 
+// Human verification checklist for a bundle (Sprint 6).
+//
+// Shaped as a real VerificationResponse — `checklist[]` of ChecklistItemResponse, keyed by the DTO's
+// own field names (title / mandatory / reviewer, NOT label / required / reviewedBy). That matters
+// more than it looks: the mock is the only thing exercising VerificationScreen while
+// verificationEndpoint is false, so if it speaks a vocabulary the backend does not, the screen is
+// developed and reviewed against a contract that does not exist and the flag flip breaks it. The
+// fixture is the contract's understudy; it has to know the same lines.
+//
+// A checklist ITEM is a legal check, not a document. Until Sprint 6 this screen derived one row per
+// document from MOCK_DOCUMENTS above, which could not express a mandatory cross-document check like
+// "sertifikat matches the deed" — the exact thing verification exists to catch.
+export const MOCK_CHECKLIST = {
+  'bnd-001': {
+    bundleId: 'bnd-001',
+    verificationId: 'ver-001',
+    status: 'IN_PROGRESS',
+    reviewerId: null,
+    reviewedAt: null,
+    progress: { total: 5, passed: 0, failed: 0, notApplicable: 0, manualRequired: 0, remaining: 5, checklistComplete: false },
+    checklist: [
+      { id: 'itm-1', category: 'IDENTITAS', title: 'NIK debitur cocok dengan KTP', mandatory: true, checkType: 'FIELD_MATCH', status: 'PENDING', decision: null, reviewer: null, reviewedAt: null, comment: null },
+      { id: 'itm-2', category: 'IDENTITAS', title: 'Nama pasangan cocok dengan Kartu Keluarga', mandatory: true, checkType: 'FIELD_MATCH', status: 'PENDING', decision: null, reviewer: null, reviewedAt: null, comment: null },
+      { id: 'itm-3', category: 'PAJAK', title: 'NPWP terbaca dan masih berlaku', mandatory: false, checkType: 'DOCUMENT_PRESENT', status: 'PENDING', decision: null, reviewer: null, reviewedAt: null, comment: null },
+      { id: 'itm-4', category: 'AGUNAN', title: 'Sertifikat agunan atas nama debitur', mandatory: true, checkType: 'MANUAL', status: 'PENDING', decision: null, reviewer: null, reviewedAt: null, comment: null },
+      { id: 'itm-5', category: 'AGUNAN', title: 'Tidak ada sengketa tercatat pada agunan', mandatory: true, checkType: 'MANUAL', status: 'PENDING', decision: null, reviewer: null, reviewedAt: null, comment: null },
+    ],
+  },
+};
+
 // OCR-extracted fields for one document, with confidence + review state (OCR Review screen).
 export const MOCK_OCR_FIELDS = {
   'doc-1': {

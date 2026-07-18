@@ -41,18 +41,30 @@ function TabIcon({ name }) {
 }
 
 // Header actions on every tab: conversation history + profile. navigate bubbles to the parent AppStack.
+//
+// Each control carries an accessibilityRole + label: without them the emoji glyph WAS the accessible
+// name, so a screen reader announced "speech balloon" with no hint of "Riwayat Percakapan" and no
+// button semantics (verified in a real browser — RC acceptance). The emoji is marked decorative and
+// the touchable owns the name.
+function HeaderAction({ label, glyph, onPress }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={{ paddingHorizontal: 8, minHeight: 40, justifyContent: 'center' }}
+    >
+      <Text accessibilityElementsHidden importantForAccessibility="no" style={{ fontSize: 18 }}>{glyph}</Text>
+    </TouchableOpacity>
+  );
+}
+
 function HeaderActions({ navigation }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 4 }}>
-      <TouchableOpacity onPress={() => navigation.navigate('Conversations')} style={{ paddingHorizontal: 8 }}>
-        <Text style={{ fontSize: 18 }}>💬</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate('Notification')} style={{ paddingHorizontal: 8 }}>
-        <Text style={{ fontSize: 18 }}>🔔</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate('Profile')} style={{ paddingHorizontal: 8 }}>
-        <Text style={{ fontSize: 18 }}>👤</Text>
-      </TouchableOpacity>
+      <HeaderAction label="Riwayat Percakapan" glyph="💬" onPress={() => navigation.navigate('Conversations')} />
+      <HeaderAction label="Notifikasi" glyph="🔔" onPress={() => navigation.navigate('Notification')} />
+      <HeaderAction label="Profil" glyph="👤" onPress={() => navigation.navigate('Profile')} />
     </View>
   );
 }

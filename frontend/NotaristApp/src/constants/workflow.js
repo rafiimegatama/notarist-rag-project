@@ -32,8 +32,16 @@ export const CASE_WORKFLOW = [
 ];
 
 // Maps a persisted CASE_STATUS to the furthest reached CASE_WORKFLOW index (for the stepper).
+//
+// CASE_CREATED and UPLOADING both sit at OPEN (0): the case exists and its documents are still being
+// collected, which is one stage to a reader even though they are two states to the aggregate.
+// OCR_RUNNING is the first to move the stepper — it IS the OCR stage (1), so the stepper finally
+// advances on real data instead of pinning every live case to stage 0.
+//
+// All three resolved to 0 through the `?? 0` fallback before they were named here; spelling them out
+// means the fallback now only catches genuinely unknown statuses, which is what a fallback is for.
 export const caseStatusToStage = (status) => (
-  { DRAFT: 0, WAITING_VERIFICATION: 2, WAITING_QC: 4, WAITING_APPROVAL: 4, READY_TO_SEND: 5, DELIVERED: 6, LOCKED: 6 }[status] ?? 0
+  { CASE_CREATED: 0, UPLOADING: 0, OCR_RUNNING: 1, DRAFT: 0, WAITING_VERIFICATION: 2, WAITING_QC: 4, WAITING_APPROVAL: 4, READY_TO_SEND: 5, DELIVERED: 6, LOCKED: 6 }[status] ?? 0
 );
 
 // Bundle ingestion pipeline for the PipelineProgress widget.
@@ -55,7 +63,21 @@ export const PRIORITY = {
 export const priorityMeta = (p) => PRIORITY[p] || PRIORITY.MEDIUM;
 
 // Case-level status. `color` is a theme color KEY (resolved through useTheme().colors[color]).
+//
+// Order matters twice: CaseListScreen builds its filter chips by walking this object, and the walk
+// reads as a lifecycle. The first three are the EARLY states, added in Sprint 7 once caseEndpoint went
+// live against the real backend. They are the whole reachable lifecycle without the ingestion
+// pipeline: a case opens in CASE_CREATED, a human walks it to UPLOADING then OCR_RUNNING, and
+// everything past that needs Role.SYSTEM. With no entry here the projection returned null and
+// caseStatusMeta fell through to its unknown branch, so every row a notary could actually see wore a
+// "Tidak diketahui" chip. A worklist that calls all of its rows unknown cannot be triaged.
+//
+// `info` twice is deliberate: UPLOADING and OCR_RUNNING are both "in progress, nothing for the human
+// to do". Colour tracks what the reader must DO, not which state it is.
 export const CASE_STATUS = {
+  CASE_CREATED: { label: 'Baru Dibuka', color: 'textMuted', code: 'NEW' },
+  UPLOADING: { label: 'Sedang Diunggah', color: 'info', code: 'UPLD' },
+  OCR_RUNNING: { label: 'Sedang OCR', color: 'info', code: 'OCR' },
   DRAFT: { label: 'Draft', color: 'textFaint', code: 'DRAFT' },
   WAITING_VERIFICATION: { label: 'Menunggu Verifikasi', color: 'warning', code: 'VERIF' },
   WAITING_QC: { label: 'Menunggu QC', color: 'info', code: 'QC' },

@@ -67,3 +67,7 @@ export { default as StickyBottomAction } from './StickyBottomAction';
 export { default as SearchFilterBar } from './SearchFilterBar';
 export { default as SearchModeToggle } from './SearchModeToggle';
 export { default as SuccessCheck } from './SuccessCheck';
+// Offline mutation queue UI (Sprint 1). SyncBadge renders nothing when the queue is empty, so it is
+// safe to mount anywhere; QueueInspector is the accountable view behind it.
+export { default as SyncBadge } from './SyncBadge';
+export { default as QueueInspector } from './QueueInspector';

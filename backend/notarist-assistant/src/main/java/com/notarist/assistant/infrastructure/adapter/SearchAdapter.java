@@ -115,7 +115,11 @@ public class SearchAdapter implements SearchPort {
                 citation.chunkIndex(),
                 null,
                 null,
-                citation.citationText(),
+                // Full chunk text, not the ~200-char citation excerpt: this DTO feeds
+                // RetrievalContextAssembler, and a truncated context makes the LLM refuse
+                // ("konteks tidak mencukupi") on questions the document plainly answers.
+                citation.chunkText() != null && !citation.chunkText().isBlank()
+                        ? citation.chunkText() : citation.citationText(),
                 citation.sourceObjectKey(),
                 citation.relevanceScore());
     }

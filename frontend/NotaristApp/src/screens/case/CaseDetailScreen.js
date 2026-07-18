@@ -64,11 +64,17 @@ export default function CaseDetailScreen({ navigation, route }) {
         <MockBanner entity="case/bundle" style={{ marginBottom: theme.spacing.md }} />
       ) : null}
 
-      {/* Informasi Debitur + workflow stepper */}
+      {/* Informasi case + workflow stepper */}
       <CaseHeader item={kase} />
+      {/* Tipe/Nomor Akta come from the real CaseResponse; Debitur/Bank/Jaminan/Notaris exist only in
+          the fixtures and render "—" against the live endpoint. Debitur is listed here because the
+          header no longer leads with it — the fixtures' debtor stays visible, just not as identity. */}
       <DocumentMetadata
         style={{ marginTop: theme.spacing.md }}
         rows={[
+          { label: 'Tipe', value: kase?.caseType },
+          { label: 'Nomor Akta', value: kase?.nomorAkta },
+          { label: 'Debitur', value: kase?.debtorName },
           { label: 'Bank', value: kase?.bank },
           { label: 'Jaminan', value: kase?.collateralType },
           { label: 'Notaris', value: kase?.notaris },

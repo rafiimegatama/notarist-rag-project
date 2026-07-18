@@ -15,7 +15,11 @@ import { Skeleton } from '../../components/Skeleton';
 import { useTheme } from '../../context/ThemeContext';
 import { useSearch } from '../../state';
 
-const GROUNDING_TONE = { HIGH: 'success', MEDIUM: 'warning', LOW: 'danger' };
+// One tone per member of the backend's GroundingScore.Level enum (HIGH/MEDIUM/LOW/UNGROUNDED).
+// UNGROUNDED was absent and fell through to the neutral 'textFaint' default — so the WORST possible
+// grounding ("< 0.25: no retrieved chunk supports this") rendered in calmer grey than LOW rendered in
+// red, inverting the warning exactly where a notary most needs it. It shares LOW's danger tone.
+const GROUNDING_TONE = { HIGH: 'success', MEDIUM: 'warning', LOW: 'danger', UNGROUNDED: 'danger' };
 
 export default function SearchScreen() {
   const theme = useTheme();
@@ -36,6 +40,21 @@ export default function SearchScreen() {
     }
     if (!result) return null;
     const citations = result.citations ?? [];
+    // A search the backend REJECTED is not a search that found nothing. SearchResponse.error() sends
+    // status:"ERROR" with an errorMessage and an empty citation list — so before Sprint 6 both landed
+    // in the same "Tidak ada hasil · coba kata kunci lain" empty state, i.e. the app told a notary to
+    // rephrase a query that had never actually run, and let them conclude the document does not
+    // exist. `failed` reads the server's own verdict rather than inferring from an empty list.
+    if (result.failed) {
+      return (
+        <ErrorState
+          title="Pencarian gagal"
+          message="Server tidak dapat menyelesaikan pencarian ini. Ini BUKAN berarti dokumen tidak ditemukan — coba lagi."
+          onRetry={() => run()}
+          fill={false}
+        />
+      );
+    }
     if (!citations.length) {
       return <EmptyState icon="🔍" title="Tidak ada hasil" description="Tidak ditemukan dokumen yang cocok. Coba kata kunci lain." fill={false} />;
     }
@@ -43,7 +62,10 @@ export default function SearchScreen() {
       <View style={{ gap: theme.spacing.md }}>
         <View style={{ flexDirection: 'row', gap: theme.spacing.sm, alignItems: 'center', flexWrap: 'wrap' }}>
           <StatusChip label={`Grounding: ${result.groundingLevel ?? '—'}`} color={GROUNDING_TONE[result.groundingLevel] || 'textFaint'} size="sm" />
-          <AppText variant="micro" color="textFaint">{result.retrievedChunkCount ?? citations.length} kutipan · {result.processingTimeMs ?? 0}ms</AppText>
+          {/* "—ms", not "0ms": an unreported duration is not an instantaneous one. */}
+          <AppText variant="micro" color="textFaint">
+            {result.retrievedChunkCount ?? citations.length} kutipan · {result.processingTimeMs ?? '—'}ms
+          </AppText>
         </View>
         {citations.map((c, i) => <CitationCard key={c.chunkId ?? i} citation={c} index={i} />)}
       </View>

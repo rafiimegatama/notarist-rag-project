@@ -28,6 +28,12 @@ export function SearchProvider({ children }) {
   const [recent, setRecent] = useState([]);
   const [saved, setSaved] = useState([]);
   const mounted = useRef(true);
+  // Invalidates a search that another one superseded (same pattern as CaseContext.generation). The
+  // screen does not disable "Cari" or the recent-search chips while a search is in flight, so two can
+  // legitimately overlap — and without this guard the SLOWER response wins the setResult race, showing
+  // query A's citations under query B's search box. For a legal document search that is not a glitch,
+  // it is the wrong evidence on screen.
+  const generation = useRef(0);
   useEffect(() => () => { mounted.current = false; }, []);
 
   const loadLocal = useCallback(async () => {
@@ -43,21 +49,25 @@ export function SearchProvider({ children }) {
     const q = (overrideQuery ?? query).trim();
     if (!q) return;
     if (overrideQuery !== undefined) setQuery(overrideQuery);
+    generation.current += 1;
+    const gen = generation.current;
     setLoading(true);
     setError(null);
     try {
       const data = await SearchService.run({ query: q, mode });
-      if (!mounted.current) return;
+      if (!mounted.current || gen !== generation.current) return;
       setResult(data);
       setOffline(false);
       loadLocal(); // refresh recent list
     } catch (err) {
-      if (!mounted.current) return;
+      if (!mounted.current || gen !== generation.current) return;
       setOffline(isOffline(err));
       setError(err);
       setResult(null);
     } finally {
-      if (mounted.current) setLoading(false);
+      // Only the newest search may clear the spinner: an old one finishing must not un-load a
+      // search that is still running.
+      if (mounted.current && gen === generation.current) setLoading(false);
     }
   }, [query, mode, loadLocal]);
 

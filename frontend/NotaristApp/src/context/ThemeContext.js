@@ -5,19 +5,19 @@
 import React, { createContext, useContext, useMemo } from 'react';
 import { useColorScheme } from 'react-native';
 import { buildTheme } from '../theme';
-import { usePreferences } from './PreferencesContext';
+import { usePreferences, textScaleValue } from './PreferencesContext';
 
 const ThemeContext = createContext(null);
 
 export function ThemeProvider({ children }) {
-  const { themeMode } = usePreferences();
+  const { themeMode, textScale } = usePreferences();
   const system = useColorScheme(); // 'light' | 'dark' | null
 
   const value = useMemo(() => {
     const resolved = themeMode === 'system' ? (system || 'dark') : themeMode;
     const scheme = resolved === 'light' ? 'light' : 'dark';
-    return { theme: buildTheme(scheme), scheme, mode: themeMode };
-  }, [themeMode, system]);
+    return { theme: buildTheme(scheme, { textScale: textScaleValue(textScale) }), scheme, mode: themeMode };
+  }, [themeMode, system, textScale]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

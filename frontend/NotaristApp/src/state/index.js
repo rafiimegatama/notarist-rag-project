@@ -4,12 +4,16 @@
 import React, { useEffect, useRef } from 'react';
 import useUser from '../hooks/useUser';
 import { setCacheScope, clearAll } from '../services/cache';
+import { setQueueScope } from '../services/mutationQueue';
+import { setOverridesScope } from '../services/conversationOverrides';
+import { startAppResumeWatch } from '../services/polling';
 import { DashboardProvider, useDashboard } from './DashboardContext';
 import { CaseProvider, useCases } from './CaseContext';
 import { BundleProvider, useBundles } from './BundleContext';
 import { ReminderProvider, useReminders } from './ReminderContext';
 import { SearchProvider, useSearch } from './SearchContext';
 import { ConversationProvider, useConversations } from './ConversationContext';
+import { SyncProvider, useSync } from './SyncContext';
 
 // Order is independent — no slice depends on another's context.
 const PROVIDERS = [
@@ -19,6 +23,10 @@ const PROVIDERS = [
   ReminderProvider,
   SearchProvider,
   ConversationProvider,
+  // Owns the offline mutation queue's flush triggers. Independent of the others like every slice
+  // here, but it must sit INSIDE CacheScopeBinder: it restores the persisted queue on mount, and the
+  // queue is scoped per user just as the cache is.
+  SyncProvider,
 ];
 
 /**
@@ -55,14 +63,38 @@ function CacheScopeBinder({ children }) {
   if (bound.current !== userId) {
     bound.current = userId;
     setCacheScope(userId);
+    // Same binding, same reason, same moment — but the queue's stake is higher than the cache's. A
+    // pending write flushed under the wrong session would post one notary's approval as another's,
+    // so the scope has to be set before SyncProvider (a child) mounts and restores. Parent render
+    // runs before child effects, which is exactly what this placement buys.
+    setQueueScope(userId);
+    // Same reason, lower stakes: a notary's private pins/renames for conversations are scoped to
+    // them, so another login on a shared device never sees them. Overrides are NOT cleared on
+    // sign-out (unlike the cache) — scoping already isolates them, and losing a user's pins because
+    // their session ended would be the queue's mistake, not the cache's.
+    setOverridesScope(userId);
   }
 
   useEffect(() => {
     return () => {
       // Sign-out (or session end). Fire-and-forget: the tree is going away and nothing awaits us.
+      //
+      // The CACHE goes; the mutation QUEUE deliberately does not. The cache is refetchable and holds
+      // debtor names on a shared office device, so leaving it is a privacy problem. A queued mutation
+      // is the opposite on both counts: it exists nowhere else, and deleting it would silently
+      // discard a notary's decision because their session timed out. It stays on disk under their
+      // scope and flushes when they sign back in.
       clearAll();
     };
   }, []);
+
+  // App-resume staleness check for the polled resources (services/polling.js, Sprint 5 Task 5).
+  // The watcher existed but nothing ever STARTED it, so backgrounding the app and reopening it later
+  // never refreshed the dashboard/reminder/conversation data a notary was about to read — only the
+  // mutation queue had a resume trigger (SyncContext). Started here because this component's lifetime
+  // is the session: resources are only registered by providers below, and the watcher's own rule
+  // ("resources nobody is watching are skipped") makes it inert while no screen subscribes.
+  useEffect(() => startAppResumeWatch(), []);
 
   return children;
 }
@@ -77,4 +109,4 @@ export function AppStateProviders({ children }) {
   );
 }
 
-export { useDashboard, useCases, useBundles, useReminders, useSearch, useConversations };
+export { useDashboard, useCases, useBundles, useReminders, useSearch, useConversations, useSync };

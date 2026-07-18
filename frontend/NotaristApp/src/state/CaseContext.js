@@ -18,6 +18,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { CaseService } from '../services';
 import { isOffline } from '../api/_support';
+import { hasMorePages } from '../api/pagination';
 import * as cache from '../services/cache';
 import { CacheKeys } from '../services/cache';
 
@@ -40,6 +41,10 @@ export function CaseProvider({ children }) {
   const [status, setStatus] = useState(null);
   const [fromCache, setFromCache] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  // Filters the caller asked for that the backend could not honour (api/cases#listCases). Held in
+  // state, not derived, because it is a property of the RESPONSE we are showing, not of the filter
+  // boxes as they stand right now.
+  const [unsupportedFilters, setUnsupportedFilters] = useState([]);
 
   const nextPage = useRef(0);
   const inFlight = useRef(false);
@@ -64,8 +69,15 @@ export function CaseProvider({ children }) {
       if (!mounted.current || gen !== generation.current) return;
       const items = data.items ?? [];
       setCases((prev) => (reset ? items : [...prev, ...items]));
-      const totalPages = data.page?.totalPages ?? 1;
-      setHasMore(page < totalPages - 1);
+      // Sprint 6: was `const totalPages = data.page?.totalPages ?? 1; setHasMore(page < totalPages - 1)`
+      // — the exact silent truncation api/pagination.js was written to kill, reimplemented here by
+      // hand and therefore never fixed. `?? 1` turns "the server did not say" into "there is exactly
+      // one page", so a response without a total stops the list at page 1 with no error and no empty
+      // state. hasMorePages asks the server first (PageInfo.hasNext), and falls back to an observed
+      // full page rather than to a guess.
+      const more = hasMorePages(data.page, items.length);
+      setHasMore(more);
+      setUnsupportedFilters(data.unsupportedFilters ?? []);
       nextPage.current = page + 1;
       const mock = CaseService.usingMock;
       setUsingMock(mock);
@@ -75,7 +87,7 @@ export function CaseProvider({ children }) {
       if (!mock && isCacheableQuery(page, q, st)) {
         setLastSyncedAt(Date.now());
         // Not awaited — the list is already rendered; persisting is housekeeping.
-        cache.write(CacheKeys.CASE_LIST, { items, hasMore: page < totalPages - 1 });
+        cache.write(CacheKeys.CASE_LIST, { items, hasMore: more });
       }
     } catch (err) {
       if (!mounted.current) return;
@@ -132,10 +144,11 @@ export function CaseProvider({ children }) {
   const value = useMemo(
     () => ({
       cases, loading, refreshing, loadingMore, error, offline, usingMock, hasMore, query, status,
-      fromCache, lastSyncedAt, setQuery, setStatus, applyFilters, refresh, loadMore, reload,
+      fromCache, lastSyncedAt, unsupportedFilters, setQuery, setStatus, applyFilters, refresh,
+      loadMore, reload,
     }),
     [cases, loading, refreshing, loadingMore, error, offline, usingMock, hasMore, query, status,
-      fromCache, lastSyncedAt, applyFilters, refresh, loadMore, reload],
+      fromCache, lastSyncedAt, unsupportedFilters, applyFilters, refresh, loadMore, reload],
   );
 
   return <CaseContext.Provider value={value}>{children}</CaseContext.Provider>;

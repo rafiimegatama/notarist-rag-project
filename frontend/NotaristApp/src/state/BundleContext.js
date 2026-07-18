@@ -31,7 +31,10 @@ export function BundleProvider({ children }) {
       setOffline(isOffline(err));
       setError(err);
     } finally {
-      if (mounted.current) setLoadingCase(null);
+      // Only clear our own flag. Opening case B while case A's load is still in flight sets
+      // loadingCase to B; when A's request settles, an unconditional null here wiped B's flag and
+      // its skeleton while B was still loading.
+      if (mounted.current) setLoadingCase((current) => (current === caseId ? null : current));
     }
   }, [cache]);
 

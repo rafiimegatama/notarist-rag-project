@@ -32,18 +32,27 @@ export default function CaseListScreen({ navigation, route }) {
   const theme = useTheme();
   const {
     cases, loading, refreshing, loadingMore, error, offline, usingMock, hasMore,
-    status, fromCache, lastSyncedAt, applyFilters, refresh, loadMore,
+    status, fromCache, lastSyncedAt, unsupportedFilters, applyFilters, refresh, loadMore,
   } = useCases();
   const [localQuery, setLocalQuery] = useState('');
   const debounce = useRef(null);
-  const appliedDeepLink = useRef(false);
+  const appliedDeepLink = useRef(null);
 
-  // Deep-link from the dashboard: preset a status filter, or open the "new case" intent once.
+  // Deep-link from the dashboard: preset a status filter, or open the "new case" intent.
+  //
+  // Keyed on the params OBJECT, not applied once-ever: this tab stays mounted, and each dashboard
+  // tile navigates with a fresh params object. The old `useRef(false)` guard consumed the FIRST deep
+  // link and ignored every one after it — tapping "Menunggu QC" then "Draft" switched tabs but left
+  // the QC filter in place, silently showing the wrong worklist under the tile the notary pressed.
+  // Same-object re-renders (focus changes, parent renders) still apply nothing, which is all the old
+  // guard was actually protecting against.
   useEffect(() => {
-    if (appliedDeepLink.current) return;
-    appliedDeepLink.current = true;
-    if (route.params?.status) applyFilters({ status: route.params.status });
-    if (route.params?.intent === 'new') promptNewCase();
+    if (!route.params || route.params === appliedDeepLink.current) return;
+    appliedDeepLink.current = route.params;
+    // Key-presence, not truthiness: the "Total Case" tile deep-links with { status: null }, meaning
+    // "show me everything" — that must CLEAR an active filter, not be ignored as a missing param.
+    if ('status' in route.params) applyFilters({ status: route.params.status || null });
+    if (route.params.intent === 'new') promptNewCase();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params]);
 
@@ -73,6 +82,19 @@ export default function CaseListScreen({ navigation, route }) {
     return null;
   }, [cases.length, error, fromCache, lastSyncedAt]);
 
+  // A filter the caller set that the backend cannot apply (api/cases#listCases). This MUST be visible:
+  // the rows below are the unfiltered list, and without this banner they read as search results. A
+  // notary typing a debtor's name and getting 20 unrelated cases back has been told a lie by the app,
+  // not by the backend. `q` has no CaseController param at all — see the backend-blocker note there.
+  const unsupportedNotice = useMemo(() => {
+    if (!unsupportedFilters || !unsupportedFilters.length) return null;
+    const parts = [];
+    if (unsupportedFilters.indexOf('query') !== -1) parts.push('pencarian teks');
+    if (unsupportedFilters.indexOf('status') !== -1) parts.push('filter status ini');
+    if (!parts.length) return null;
+    return `Backend belum mendukung ${parts.join(' dan ')}. Daftar di bawah BELUM difilter.`;
+  }, [unsupportedFilters]);
+
   // --- Stable identities for the FlatList (Sprint 4, Task 10) -----------------------------------
   // Every one of these was an inline arrow. FlatList compares renderItem/ListHeaderComponent by
   // identity to decide what to re-render, so a new function each render meant every visible row
@@ -97,11 +119,12 @@ export default function CaseListScreen({ navigation, route }) {
       {usingMock ? <MockBanner entity="/cases" /> : null}
       {offline ? <OfflineBanner /> : null}
       {staleNotice ? <Banner variant="warning" message={staleNotice} /> : null}
+      {unsupportedNotice ? <Banner variant="warning" message={unsupportedNotice} /> : null}
       <SearchBar value={localQuery} onChangeText={onChangeQuery} placeholder="Cari debitur, nomor case, bank…" />
       <FilterBar options={STATUS_OPTIONS} selected={status} onSelect={onSelectStatus} />
     </View>
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [theme, usingMock, offline, staleNotice, localQuery, status, onSelectStatus]);
+  ), [theme, usingMock, offline, staleNotice, unsupportedNotice, localQuery, status, onSelectStatus]);
 
   if (showInitialLoading) {
     return <Screen padded={false}><View style={{ padding: theme.spacing.lg }}>{header}</View><SkeletonList count={6} /></Screen>;

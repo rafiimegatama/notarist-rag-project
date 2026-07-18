@@ -1,83 +1,84 @@
+// Sprint 6: a private base64Decode + decodeJwtPayload pair lived here — a second, subtly weaker copy
+// of utils/jwt.js (that one guards a non-string token and a missing payload segment; this one threw
+// past its own try/catch on a malformed token). Its only caller was logout(), which decoded the
+// access token to compute the `jti`/`remainingTtlSeconds` params the backend deliberately stopped
+// accepting. With those params gone the whole decoder is unreachable, so it goes with them rather
+// than sitting here as a duplicate implementation of a security-adjacent primitive.
+//
+// utils/jwt.js remains the one JWT reader (models/User.js uses it for the profile claims).
 import client from './client';
-import * as SecureStore from 'expo-secure-store';
+// tokenStore, not SecureStore directly: on web SecureStore rejects every call (no SDK 57 web
+// implementation) and login could never persist a token. See utils/tokenStore.js.
+import { getToken, setToken, deleteToken } from '../utils/tokenStore';
+import { unwrapOrThrow } from './envelope';
+import { ApiError, ErrorKind } from './errors';
 
-const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-function base64Decode(input) {
-  let output = '';
-  let buffer = 0;
-  let bits = 0;
-  for (const char of input) {
-    if (char === '=') break;
-    const value = BASE64_CHARS.indexOf(char);
-    if (value === -1) continue;
-    buffer = (buffer << 6) | value;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      output += String.fromCharCode((buffer >> bits) & 0xff);
-    }
-  }
-  return output;
-}
-
-function decodeJwtPayload(token) {
-  try {
-    const payload = token.split('.')[1];
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const binary = base64Decode(base64);
-    const json = decodeURIComponent(
-      binary.split('').map((c) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')
-    );
-    return JSON.parse(json);
-  } catch (_) {
-    return null;
-  }
-}
-
+// POST /auth/login -> ApiResponse<TokenResponse>
+// TokenResponse { accessToken, refreshToken, tokenType, expiresIn, userId, roles, tenantId, sessionId }
 export async function login(username, password) {
   const response = await client.post('/auth/login', { username, password });
-  const { accessToken, refreshToken, sessionId } = response.data.data;
-  await SecureStore.setItemAsync('jwt_token', accessToken);
-  if (refreshToken) {
-    await SecureStore.setItemAsync('refresh_token', refreshToken);
+  // unwrapOrThrow, not `response.data.data`: the bare destructure throws a raw TypeError the moment a
+  // proxy, captive portal or gateway timeout answers with something that is not the envelope — and a
+  // TypeError has no `kind`, so the login screen could not classify it and showed "terjadi kesalahan"
+  // for what is really a network problem. It also rejects a 200-with-status:"ERROR", which this path
+  // previously read straight past into a destructure of `null`.
+  const data = unwrapOrThrow(response, null);
+
+  // An envelope that unwrapped cleanly but carries no token is not a login. Fail loudly rather than
+  // storing `undefined` and leaving the app in a signed-in state holding no credential.
+  if (!data || !data.accessToken) {
+    throw new ApiError({
+      kind: ErrorKind.SERVER,
+      status: response && response.status,
+      message: 'Masuk gagal. Coba lagi.',
+      diagnostic: 'POST /auth/login returned no accessToken in the response envelope',
+      retryable: true,
+    });
   }
-  if (sessionId) {
-    await SecureStore.setItemAsync('session_id', sessionId);
+
+  await setToken('jwt_token', data.accessToken);
+  if (data.refreshToken) {
+    await setToken('refresh_token', data.refreshToken);
   }
-  return response.data.data;
+  if (data.sessionId) {
+    await setToken('session_id', data.sessionId);
+  }
+  return data;
 }
 
+// POST /auth/logout?sessionId={uuid}
+//
+// `sessionId` is the WHOLE contract (AuthController.logout). This used to also send `jti` and
+// `remainingTtlSeconds`, computed by decoding the access token here on the device. Those params were
+// removed from the backend on purpose: it now derives both from the caller's own bearer token,
+// because trusting a client-supplied jti let any caller revoke any token, and a client that simply
+// omitted it got a logout that revoked nothing.
+//
+// Spring ignores unknown query params, so this was stale rather than broken — the logout worked, and
+// the two extra params were decoration on the wire. Removed because dead code that mirrors a
+// deliberately-removed contract is a standing invitation to "restore" it.
 export async function logout() {
   try {
-    const sessionId = await SecureStore.getItemAsync('session_id');
-    const token = await SecureStore.getItemAsync('jwt_token');
+    const sessionId = await getToken('session_id');
     if (sessionId) {
-      const params = { sessionId };
-      const claims = token ? decodeJwtPayload(token) : null;
-      if (claims?.jti && claims?.exp) {
-        const remainingTtlSeconds = Math.max(0, claims.exp - Math.floor(Date.now() / 1000));
-        params.jti = claims.jti;
-        params.remainingTtlSeconds = remainingTtlSeconds;
-      }
-      await client.post('/auth/logout', null, { params });
+      await client.post('/auth/logout', null, { params: { sessionId } });
     }
   } catch (_) {
     // ignore server errors on logout
   } finally {
-    await SecureStore.deleteItemAsync('jwt_token');
-    await SecureStore.deleteItemAsync('refresh_token');
-    await SecureStore.deleteItemAsync('session_id');
+    await deleteToken('jwt_token');
+    await deleteToken('refresh_token');
+    await deleteToken('session_id');
   }
 }
 
 export async function getStoredToken() {
-  return SecureStore.getItemAsync('jwt_token');
+  return getToken('jwt_token');
 }
 
 // Read-only accessor for display purposes. The session id is returned by /auth/login but is NOT a
 // JWT claim, so after an app relaunch (session restored from the token alone) it is only available
 // from storage. Profile reads it through here instead of showing an empty field.
 export async function getStoredSessionId() {
-  return SecureStore.getItemAsync('session_id');
+  return getToken('session_id');
 }

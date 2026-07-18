@@ -126,8 +126,10 @@ public class ResponseStreamer {
         }
 
         // 3. Stream confidence
+        // Locale.ROOT: the default locale formats the score as "0,87" on a comma-decimal JVM
+        // (id_ID is a likely deployment locale) and clients parse this off the SSE wire.
         String confidenceData = response.confidence().name()
-                + " | score=" + String.format("%.2f", response.groundingScore());
+                + " | score=" + String.format(java.util.Locale.ROOT, "%.2f", response.groundingScore());
         emit(emitter, SseEvent.confidence(confidenceData, traceId, seq.getAndIncrement()));
 
         // 4. Stream warnings

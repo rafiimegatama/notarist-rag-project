@@ -3,16 +3,22 @@ import { View, RefreshControl, TouchableOpacity } from 'react-native';
 import Screen from '../../components/Screen';
 import AppText from '../../components/AppText';
 import StatCard from '../../components/StatCard';
-import InfoCard from '../../components/InfoCard';
+import Accordion from '../../components/Accordion';
 import SectionHeader from '../../components/SectionHeader';
 import MockBanner from '../../components/MockBanner';
 import OfflineBanner from '../../components/OfflineBanner';
+import SyncBadge from '../../components/SyncBadge';
+import RealtimeBadge from '../../components/RealtimeBadge';
 import Banner from '../../components/Banner';
+import Card from '../../components/Card';
+import BarChart from '../../components/BarChart';
 import ErrorState from '../../components/ErrorState';
 import { SkeletonList } from '../../components/Skeleton';
 import { useTheme } from '../../context/ThemeContext';
 import { relativeTime } from '../../utils/format';
 import useUser from '../../hooks/useUser';
+import useResponsive from '../../hooks/useResponsive';
+import usePolledResource from '../../hooks/usePolledResource';
 import { useDashboard } from '../../state';
 
 // Quick actions per the workflow: Upload, New Case, Search, Assistant, QC Checklist.
@@ -27,12 +33,28 @@ const ACTIONS = [
 export default function DashboardScreen({ navigation }) {
   const theme = useTheme();
   const user = useUser();
+  const { isTablet, isLarge } = useResponsive();
   const { summary, loading, refreshing, error, offline, usingMock, fromCache, lastSyncedAt, refresh } = useDashboard();
+
+  // Activate live polling while this screen is focused. DashboardContext only REGISTERS the resource
+  // (see its note) — nothing polls until a visible screen subscribes, which is what makes the numbers,
+  // the animated counters and the realtime badge below actually live rather than fetch-once.
+  usePolledResource('dashboard');
+
+  // Responsive tile grid: 2-up on a phone, 3-up on a tablet, 4-up on a large/landscape tablet or web.
+  const cardWidth = isLarge ? '23%' : isTablet ? '31%' : '48%';
+
+  // Honest freshness signal for the animated numbers. Order matters: offline first (nothing is live),
+  // then an in-flight refresh, then cached/failed, else genuinely live.
+  const realtimeStatus = offline ? 'offline' : refreshing ? 'syncing' : (error || fromCache) ? 'stale' : 'live';
 
   // Stable identities: these end up as StatCard's `onPress`, and StatCard is memoized. Inline arrows
   // here would hand it a new prop every render and defeat the memo entirely (Sprint 4, Task 10).
+  // Always sends the `status` key — null means "clear the filter". CaseListScreen's deep-link effect
+  // switches on key presence, so `{}` would be ignored and the Total Case tile would land on whatever
+  // filter the list last had.
   const goCases = useCallback(
-    (status) => navigation.navigate('Kasus', status ? { status } : {}),
+    (status) => navigation.navigate('Kasus', { status: status ?? null }),
     [navigation],
   );
   const goReminders = useCallback(() => navigation.navigate('Pengingat'), [navigation]);
@@ -58,6 +80,19 @@ export default function DashboardScreen({ navigation }) {
     { label: 'Pengingat', value: summary.reminderCount, tone: 'warning', icon: '🔔', onPress: goReminders },
   ] : []), [summary, goCases, goReminders]);
 
+  // Pipeline distribution for the workload chart — the five active stages a case moves through, in
+  // order. Each bar drills into the same filtered case list its matching tile opens, so the chart is
+  // not a second dead-end view of the numbers. Colours mirror the tiles' tones.
+  const chartData = useMemo(() => (summary ? [
+    { label: 'Draft', value: summary.draft, color: 'textFaint', status: 'DRAFT' },
+    { label: 'Menunggu Verifikasi', value: summary.waitingVerification, color: 'warning', status: 'WAITING_VERIFICATION' },
+    { label: 'Menunggu QC', value: summary.waitingQc, color: 'info', status: 'WAITING_QC' },
+    { label: 'Menunggu Approval', value: summary.waitingApproval, color: 'primary', status: 'WAITING_APPROVAL' },
+    { label: 'Siap Kirim', value: summary.readyToSend, color: 'success', status: 'READY_TO_SEND' },
+  ] : []), [summary]);
+
+  const onChartPress = useCallback((item) => goCases(item.status), [goCases]);
+
   // Only worth saying when there ARE numbers on screen whose freshness is in doubt: cached data still
   // waiting on its background refresh, or data whose refresh has already failed.
   const staleNotice = useMemo(() => {
@@ -78,9 +113,20 @@ export default function DashboardScreen({ navigation }) {
       scroll
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.colors.primary} />}
     >
-      <View style={{ marginBottom: theme.spacing.md }}>
-        <AppText variant="bodySm" color="textMuted">Selamat datang kembali</AppText>
-        <AppText variant="h2" numberOfLines={1}>{user?.displayName ?? 'Notaris'}</AppText>
+      {/* The greeting row carries the sync badge because the dashboard is the screen a notary opens
+          first and returns to between tasks — the one place "your work has not left this device yet"
+          is seen without going looking for it. SyncBadge renders null on an empty queue, so this row
+          is unchanged in the normal case; the badge routes to the inspector in Settings, which owns
+          the detail. */}
+      <View style={{ marginBottom: theme.spacing.md, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: theme.spacing.sm }}>
+        <View style={{ flex: 1 }}>
+          <AppText variant="bodySm" color="textMuted">Selamat datang kembali</AppText>
+          <AppText variant="h2" numberOfLines={1}>{user?.displayName ?? 'Notaris'}</AppText>
+          {/* Freshness of the numbers below — pulses green while live, states plainly when not. Only
+              shown once there is a summary to be fresh OR stale about. */}
+          {summary ? <RealtimeBadge status={realtimeStatus} style={{ marginTop: theme.spacing.xs }} /> : null}
+        </View>
+        <SyncBadge onPress={() => navigation.navigate('Settings')} style={{ marginTop: theme.spacing.xs }} />
       </View>
 
       {usingMock ? <MockBanner entity="dashboard" style={{ marginBottom: theme.spacing.md }} /> : null}
@@ -107,11 +153,22 @@ export default function DashboardScreen({ navigation }) {
               tone={c.tone}
               icon={c.icon}
               onPress={c.onPress}
-              style={{ width: '48%', flexGrow: 1 }}
+              style={{ width: cardWidth, flexGrow: 1 }}
             />
           ))}
         </View>
       )}
+
+      {/* Workload distribution — the pipeline stages as bars. Rendered only alongside real numbers,
+          never over a skeleton or an error. */}
+      {summary && !loading ? (
+        <>
+          <SectionHeader title="Distribusi Beban Kerja" />
+          <Card>
+            <BarChart data={chartData} onPressItem={onChartPress} />
+          </Card>
+        </>
+      ) : null}
 
       <SectionHeader title="Aksi Cepat" />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.sm }}>
@@ -120,10 +177,12 @@ export default function DashboardScreen({ navigation }) {
         ))}
       </View>
 
-      <InfoCard title="Alur Kerja" icon="🔄" tone="info" style={{ marginTop: theme.spacing.xl }}>
-        Case → Bundle → Upload → OCR Review → Verifikasi → Draft → QC → Approval → Terkirim ke Bank.
-        Pantau setiap tahap melalui kartu status di atas.
-      </InfoCard>
+      <Accordion title="Alur Kerja" icon="🔄" style={{ marginTop: theme.spacing.xl }}>
+        <AppText variant="bodySm" color="textMuted" style={{ lineHeight: 20 }}>
+          Case → Bundle → Upload → OCR Review → Verifikasi → Draft → QC → Approval → Terkirim ke Bank.
+          Pantau setiap tahap melalui kartu status di atas.
+        </AppText>
+      </Accordion>
       <View style={{ height: theme.spacing.xxl }} />
     </Screen>
   );

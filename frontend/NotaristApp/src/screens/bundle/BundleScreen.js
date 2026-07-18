@@ -1,13 +1,10 @@
 import React from 'react';
 import { View, RefreshControl } from 'react-native';
 import Screen from '../../components/Screen';
-import Card from '../../components/Card';
 import BundleHeader from '../../components/BundleHeader';
-import BundleProgress from '../../components/BundleProgress';
 import SectionHeader from '../../components/SectionHeader';
-import DocumentCard from '../../components/DocumentCard';
+import BundleExplorer from '../../components/BundleExplorer';
 import PrimaryButton from '../../components/PrimaryButton';
-import EmptyState from '../../components/EmptyState';
 import ErrorState from '../../components/ErrorState';
 import MockBanner from '../../components/MockBanner';
 import { Skeleton } from '../../components/Skeleton';
@@ -46,26 +43,25 @@ export default function BundleScreen({ navigation, route }) {
     >
       {BundleService.usingMock ? <MockBanner entity="bundle" style={{ marginBottom: theme.spacing.md }} /> : null}
 
-      <BundleHeader bundle={bundle} documentCount={docs.length} />
+      {/* documentCount comes from the BUNDLE, not from docs.length. BundleResponse carries a real
+          `documentCount`, while the document list is a separate call that can fail — or, against the
+          real backend, cannot be served at all. Counting the rows we happened to fetch would report
+          "0 dokumen" for a bundle the server itself says holds four. */}
+      <BundleHeader bundle={bundle} documentCount={bundle?.documentCount ?? docs.length} />
 
-      {/* Per-stage status */}
-      <Card style={{ marginTop: theme.spacing.lg }}>
-        <BundleProgress bundle={bundle} />
-      </Card>
-
-      {/* Dokumen Masuk */}
-      <SectionHeader title="Dokumen Masuk" />
-      {docsQuery.loading && !docs.length ? (
-        <Skeleton width="100%" height={120} />
-      ) : docs.length ? (
-        <View style={{ gap: theme.spacing.sm }}>
-          {docs.map((d) => (
-            <DocumentCard key={d.id} item={d} onPress={() => navigation.navigate('OcrReview', { documentId: d.id, bundleId, documentName: d.name })} />
-          ))}
-        </View>
-      ) : (
-        <EmptyState icon="📄" title="Belum ada dokumen" description="Bundle ini belum berisi dokumen." fill={false} />
-      )}
+      {/* Bundle Explorer (Sprint 7): metadata + workflow stages + searchable/filterable documents as
+          an expandable tree. The document branch degrades honestly — the docs list has no live route
+          (api/bundles#getBundleDocuments), so its failure renders inside the branch, never as an empty
+          "no documents" that would contradict the bundle's own documentCount. */}
+      <View style={{ marginTop: theme.spacing.lg }}>
+        <BundleExplorer
+          bundle={bundle}
+          docs={docs}
+          docsLoading={docsQuery.loading}
+          docsError={docsQuery.error && !docs.length ? docsQuery.error : null}
+          onOpenDocument={(d) => navigation.navigate('OcrReview', { documentId: d.id, bundleId, documentName: d.name })}
+        />
+      </View>
 
       {/* Verification entry */}
       <SectionHeader title="Verifikasi" />

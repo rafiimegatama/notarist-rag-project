@@ -7,7 +7,8 @@
 // list is what makes switching windows instant and offline-tolerant.
 import client from './client';
 import { FEATURES } from '../constants/config';
-import { mock, is404 } from './_support';
+import { mock } from './_support';
+import { unwrap } from './envelope';
 import { normalizeReminder } from '../models/Reminder';
 import { MOCK_REMINDERS, MOCK_NOW } from '../mocks/fixtures';
 
@@ -49,7 +50,10 @@ export async function listReminders() {
   if (FEATURES.reminderEndpoint) {
     try {
       const response = await client.get('/reminders');
-      const body = response.data?.data ?? {};
+      // unwrap(), not `response.data?.data ?? {}`: the same payload, but it also tolerates a body
+      // that is not the envelope, so a gateway HTML page yields an empty reminder list instead of an
+      // exception thrown from a property read on a string.
+      const body = unwrap(response, null) ?? {};
 
       // Order matters: soonest-due first overall. The server sorts within each bucket, and the
       // buckets themselves are already in urgency order.
@@ -64,9 +68,20 @@ export async function listReminders() {
       // to Date.now(), and ReminderContext switches away from MOCK_NOW as soon as usingMock is false.
       return Object.assign(flat, { __mock: false });
     } catch (err) {
-      // Endpoint not deployed in this environment: behave exactly as if the flag were still false.
-      if (!is404(err)) throw err;
-      return mock(MOCK_REMINDERS.map((r) => normalizeReminder(r, MOCK_NOW)), { label: 'reminders (404)' });
+      // A 404 is an ERROR here, not a cue to invent reminders. This used to read "endpoint not
+      // deployed in this environment: behave exactly as if the flag were still false" and answered a
+      // 404 with MOCK_REMINDERS — on the LIVE path, with the flag ON.
+      //
+      // Sprint 7 verified GET /api/v1/reminders against the running backend: it exists and answers
+      // 200. The premise is gone, and what the fallback actually did was fabricate SKMHT and APHT
+      // deadlines — statutory dates, computed against MOCK_NOW, a clock that is not this one — and
+      // hand them to a notary as their queue. "The route moved" and "your SKMHT is overdue" are not
+      // interchangeable claims, and a 404 can only ever mean the first.
+      //
+      // Reminders have no honest mock for the reason search and the assistant have none: each one is
+      // a legal deadline on a real case, not a placeholder. Let it throw — ReminderContext already
+      // classifies an ApiError and the screen renders ErrorState.
+      throw err;
     }
   }
   // Use the fixtures' fixed "now" so mock severities stay stable/deterministic in review.

@@ -1,0 +1,4 @@
+
+# Hybrid boot real credentials (infra/docker/.env.hybrid) — never commit
+infra/docker/.env.hybrid
+frontend/NotaristApp/.env.hybrid

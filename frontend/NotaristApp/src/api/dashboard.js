@@ -21,6 +21,7 @@
 import client from './client';
 import { FEATURES } from '../constants/config';
 import { mock, is404 } from './_support';
+import { unwrap } from './envelope';
 import { computeDashboardSummary } from '../mocks/fixtures';
 
 // CaseState -> the counter each dashboard card reads. The UI's status vocabulary is older and
@@ -62,16 +63,24 @@ export async function getDashboardSummary() {
       client.get('/reminders'),
     ]);
 
-    // statistics is the only source of the per-state counters. Without it there is no dashboard, so
-    // treat its 404 the way the flag being false is treated.
-    if (statsRes.status === 'rejected') {
-      if (!is404(statsRes.reason)) throw statsRes.reason;
-      return mock(computeDashboardSummary(), { label: 'dashboard (statistics 404)' });
-    }
+    // statistics is the only source of the per-state counters. Without it there is no dashboard —
+    // and "no dashboard" is then the only honest thing to show.
+    //
+    // This used to answer a 404 with mock(computeDashboardSummary()), "treating its 404 the way the
+    // flag being false is treated". On the LIVE path that let a routing change silently swap a
+    // notary's real workload for counters computed from MOCK_CASES — a plausible dashboard with every
+    // number invented. Sprint 7 verified GET /cases/statistics answers 200 against the running
+    // backend, so a 404 here is a genuine fault; surface it like any other.
+    if (statsRes.status === 'rejected') throw statsRes.reason;
 
-    const statusCounts = statsRes.value?.data?.data?.statusCounts ?? {};
-    const summary = summaryRes.status === 'fulfilled' ? summaryRes.value?.data?.data : null;
-    const reminders = remindersRes.status === 'fulfilled' ? remindersRes.value?.data?.data : null;
+    // unwrap() rather than `?.data?.data?.` chains. Same payload, but this is the module that
+    // composes THREE endpoints — so it is the one most likely to meet a proxied or partial response,
+    // and the one where a hand-rolled dig quietly yielding undefined turns into a dashboard of
+    // zeroes rather than an error. A notary reading "0 menunggu verifikasi" cannot tell it apart
+    // from a real empty queue.
+    const statusCounts = unwrap(statsRes.value, null)?.statusCounts ?? {};
+    const summary = summaryRes.status === 'fulfilled' ? unwrap(summaryRes.value, null) : null;
+    const reminders = remindersRes.status === 'fulfilled' ? unwrap(remindersRes.value, null) : null;
 
     // A non-404 failure on a secondary source is a real backend problem. Surface it rather than
     // quietly showing a dashboard with holes in it.
@@ -97,7 +106,12 @@ export async function getDashboardSummary() {
 
     return { totalCase, ...counters, overdueSkmht, reminderCount, __mock: false };
   } catch (err) {
-    if (!is404(err)) throw err;
-    return mock(computeDashboardSummary(), { label: 'dashboard (404)' });
+    // Rethrow, always. This used to end `if (!is404(err)) throw err; return mock(...)`, which made
+    // ANY 404 raised anywhere in the block above resolve to a dashboard computed from MOCK_CASES —
+    // including the statistics 404 the block above now deliberately throws, so that fix would have
+    // landed right back here and been converted into fixtures. On the live path a 404 is a fault
+    // (route moved, gateway, revoked scope), and a notary's caseload is not something to invent when
+    // we cannot read it. The try/catch is kept only for this comment and the rethrow's clarity.
+    throw err;
   }
 }

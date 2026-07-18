@@ -27,8 +27,12 @@ export default function ProfileScreen({ navigation }) {
   const user = useUser();
 
   // Live statistic from an EXISTING endpoint. Never invents a number.
+  //
+  // Reads `.page`, not `.data.page`: api/documents#listDocuments returns a normalized { items, page }
+  // as of Sprint 6 rather than the raw axios body. `totalElements` stays undefined when the server
+  // omits it and val() renders "—"; the count is never inferred from the page we happen to hold.
   const stats = useAsync(() => listDocuments(0, 1), []);
-  const totalDocuments = stats.data?.data?.page?.totalElements;
+  const totalDocuments = stats.data?.page?.totalElements;
 
   // After a relaunch the session id lives only in storage (it is not a JWT claim), so fall back to
   // it rather than rendering an empty Session field.

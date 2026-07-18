@@ -38,7 +38,12 @@ export async function getConversationHistory(sessionId) {
 export async function listConversations() {
   if (FEATURES.conversationListEndpoint) {
     const response = await client.get('/assistant/conversations');
-    return (response.data.data?.items ?? []).map(normalizeConversation);
+    // toList/unwrap rather than `response.data.data?.items ?? []`. This route does not exist yet, so
+    // its payload shape is UNKNOWN — which is exactly why guessing `{items}` and swallowing anything
+    // else with `?? []` is the wrong bet: that is the shape assumption that made listBundles return
+    // zero bundles in silence. toList accepts a bare array or a paged wrapper, so whichever shape the
+    // endpoint ships with, this reads it or renders an honest empty — never a silent one.
+    return toList(unwrap(response, []), ['items', 'content']).map(normalizeConversation);
   }
   return mock(MOCK_CONVERSATIONS.map(normalizeConversation), { label: 'conversations' });
 }
@@ -46,7 +51,7 @@ export async function listConversations() {
 export async function deleteConversation(sessionId) {
   if (FEATURES.conversationListEndpoint) {
     const response = await client.delete(`/assistant/conversations/${sessionId}`);
-    return response.data.data;
+    return unwrap(response, null);
   }
   return mock({ sessionId, deleted: true }, { label: 'conversation-delete', delay: 250 });
 }

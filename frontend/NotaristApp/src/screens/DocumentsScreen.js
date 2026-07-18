@@ -10,13 +10,31 @@ import {
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { listDocuments, initiateUpload, uploadFileToSignedUrl, confirmUpload, computeFileSha256, getIngestionStatus } from '../api/documents';
+import { hasMorePages } from '../api/pagination';
 import { useTheme } from '../context/ThemeContext';
+import { useGlobalLoading } from '../context/LoadingContext';
 import useThemedStyles from '../hooks/useThemedStyles';
 import AppText from '../components/AppText';
 import EmptyState from '../components/EmptyState';
+import FAB from '../components/FAB';
 import { SkeletonList } from '../components/Skeleton';
 
 const TERMINAL_PIPELINE_STATUSES = new Set(['COMPLETED', 'FAILED', 'DLQ']);
+
+// A delay that resolves EARLY when the caller aborts, so cancelling the processing-wait does not sit
+// through the remainder of a 3s tick before the loop notices. Cleans up its own listener/timer.
+function abortableDelay(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', done);
+      resolve();
+    }
+    signal?.addEventListener?.('abort', done);
+  });
+}
 
 const DOC_TYPE_LABELS = {
   AKTA: 'Akta',
@@ -80,6 +98,7 @@ function DocumentCard({ doc, onPress, styles, theme }) {
 export default function DocumentsScreen() {
   const theme = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const globalLoading = useGlobalLoading();
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -114,10 +133,14 @@ export default function DocumentsScreen() {
       // Drop a stale load-more that resolved after a reset replaced the list underneath it.
       if (generation !== generationRef.current) return;
 
-      const items = data.data?.items ?? [];
+      // Sprint 6: api/documents#listDocuments now returns a normalized { items, page } instead of the
+      // raw envelope, so this no longer digs `data.data?.items` out by hand. The pagination read was
+      // `data.data?.page?.totalPages ?? 1` — the `?? 1` default that silently stops a list at page one
+      // whenever the server sends no total. hasMorePages asks PageInfo.hasNext first and falls back to
+      // an observation, never to a guess.
+      const items = data.items ?? [];
       setDocuments(prev => (reset ? items : [...prev, ...items]));
-      const totalPages = data.data?.page?.totalPages ?? 1;
-      setHasMore(pageToLoad < totalPages - 1);
+      setHasMore(hasMorePages(data.page, items.length));
       nextPageRef.current = pageToLoad + 1;
     } catch (err) {
       if (err.response?.status !== 404) {
@@ -151,9 +174,14 @@ export default function DocumentsScreen() {
     setShowPicker(true);
   };
 
-  const pollIngestionStatus = useCallback(async (jobId) => {
+  // Wait for the ingestion pipeline to finish, refreshing the list when it does. `signal` lets the
+  // caller stop waiting — see startProcessingWait. Aborting only stops the WAIT: the document is
+  // already uploaded and keeps processing on the server; it simply appears on the next refresh.
+  const pollIngestionStatus = useCallback(async (jobId, signal) => {
     for (let attempt = 0; attempt < 10; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (signal?.aborted) return;
+      await abortableDelay(3000, signal);
+      if (signal?.aborted) return;
       try {
         const status = await getIngestionStatus(jobId);
         if (TERMINAL_PIPELINE_STATUSES.has(status.pipelineStatus)) {
@@ -172,27 +200,55 @@ export default function DocumentsScreen() {
     }
   }, [loadDocuments]);
 
+  // The processing wait is its OWN background task, separate from the upload, because it is the only
+  // safe thing to cancel: the transfer and confirm are atomic and must not be interrupted, but "stop
+  // waiting for the pipeline" undoes nothing. Not awaited — it lives in the top strip until it
+  // finishes or the notary cancels it.
+  const startProcessingWait = useCallback((jobId) => {
+    globalLoading.withLoading(
+      ({ signal }) => pollIngestionStatus(jobId, signal),
+      { message: 'Memproses dokumen…', blocking: false, cancelable: true },
+    );
+  }, [globalLoading, pollIngestionStatus]);
+
   const handleConfirmUpload = async () => {
     const file = pendingFile;
     if (!file) return;
     setShowPicker(false);
     setUploading(true);
     try {
-      const checksumSha256 = await computeFileSha256(file.uri);
+      // Upload runs as a BACKGROUND task (blocking:false) so the notary can keep browsing the list —
+      // the top strip shows coarse STEP progress. It is deliberately NOT cancelable: the transfer to
+      // the signed URL and the confirm are atomic, and File.upload exposes no abort, so offering a
+      // cancel here would be a button that either lies or corrupts a half-written object.
+      const jobId = await globalLoading.withLoading(
+        async ({ update }) => {
+          update({ message: 'Menghitung checksum…', progress: 0.15 });
+          const checksumSha256 = await computeFileSha256(file.uri);
 
-      const { jobId, signedUrl, requiredHeaders } = await initiateUpload({
-        originalFilename: file.name,
-        checksumSha256,
-        documentType: selectedDocType,
-        classificationLevel: selectedClassification,
-      });
+          update({ message: 'Menyiapkan unggahan…', progress: 0.3 });
+          const { jobId: id, signedUrl, requiredHeaders } = await initiateUpload({
+            originalFilename: file.name,
+            checksumSha256,
+            documentType: selectedDocType,
+            classificationLevel: selectedClassification,
+          });
 
-      await uploadFileToSignedUrl(signedUrl, file.uri, requiredHeaders);
-      await confirmUpload(jobId, checksumSha256);
+          update({ message: `Mengunggah ${file.name}…`, progress: 0.55 });
+          await uploadFileToSignedUrl(signedUrl, file.uri, requiredHeaders);
+
+          update({ message: 'Mengonfirmasi unggahan…', progress: 0.85 });
+          await confirmUpload(id, checksumSha256);
+
+          update({ message: 'Selesai diunggah', progress: 1 });
+          return id;
+        },
+        { message: 'Mengunggah dokumen…', blocking: false, progress: 0 },
+      );
 
       Alert.alert('Berhasil', 'Dokumen berhasil diunggah dan sedang diproses');
       loadDocuments(true);
-      pollIngestionStatus(jobId);
+      startProcessingWait(jobId);
     } catch (err) {
       const msg = err.response?.data?.errorMessage || 'Upload gagal';
       Alert.alert('Upload Gagal', msg);
@@ -244,23 +300,15 @@ export default function DocumentsScreen() {
         </View>
       )}
 
-      <TouchableOpacity
-        style={[styles.fab, uploading && styles.fabDisabled]}
+      {/* Animated FAB (Sprint 12): pops in on mount, dips on press. `busy` shows the upload spinner
+          and disables it — the same action feedback the old inline FAB carried, now animated. The
+          accessible name still names the action ("Unggah dokumen"), never the "+" glyph. */}
+      <FAB
+        icon="+"
         onPress={handlePickFile}
-        disabled={uploading}
-        // Sprint 4, Task 11: the accessible name was the glyph "+", so this announced as "plus" —
-        // the screen's primary action, unidentifiable. `busy` reports the upload state that the
-        // spinner conveys visually.
-        accessibilityRole="button"
+        busy={uploading}
         accessibilityLabel={uploading ? 'Mengunggah dokumen' : 'Unggah dokumen'}
-        accessibilityState={{ disabled: uploading, busy: uploading }}
-      >
-        {uploading ? (
-          <ActivityIndicator color={theme.colors.primaryText} size="small" />
-        ) : (
-          <AppText accessibilityElementsHidden importantForAccessibility="no" style={styles.fabIcon}>+</AppText>
-        )}
-      </TouchableOpacity>
+      />
 
       <Modal visible={showPicker} transparent animationType="slide" onRequestClose={() => setShowPicker(false)}>
         <View style={styles.modalOverlay}>

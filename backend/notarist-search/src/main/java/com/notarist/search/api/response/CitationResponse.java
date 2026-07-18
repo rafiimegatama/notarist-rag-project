@@ -11,6 +11,7 @@ public record CitationResponse(
         String retrievalReason,
         double relevanceScore,
         String citationText,
+        String chunkText,
         String sourceObjectKey,
         int chunkIndex
 ) {
@@ -22,6 +23,7 @@ public record CitationResponse(
                 entry.retrievalReason().name(),
                 entry.relevanceScore(),
                 entry.citationText(),
+                entry.chunkText(),
                 entry.sourceObjectKey(),
                 entry.chunkIndex());
     }

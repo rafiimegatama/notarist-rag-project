@@ -11,8 +11,22 @@ function buildShadows(colors) {
   return out;
 }
 
-// Assembles a full theme object for a given color scheme. Consumed by ThemeContext.
-export function buildTheme(mode) {
+// Scales the NUMERIC typography sizes by `textScale`, leaving the weight strings untouched. This is
+// how the in-app Large Font control (Sprint 11) reaches every component: AppText and any component
+// reading theme.typography[...] for a fontSize gets the scaled value, with no per-component change.
+// Rounded so a 15px body at 1.15 becomes a clean 17, not 17.25.
+function scaleTypography(scale) {
+  if (!scale || scale === 1) return typography;
+  const out = {};
+  for (const [key, value] of Object.entries(typography)) {
+    out[key] = typeof value === 'number' ? Math.round(value * scale) : value;
+  }
+  return out;
+}
+
+// Assembles a full theme object for a given color scheme. `textScale` (default 1) multiplies font
+// sizes for the Large Font accessibility setting. Consumed by ThemeContext.
+export function buildTheme(mode, { textScale = 1 } = {}) {
   const colors = palettes[mode] || palettes.dark;
   return {
     mode,
@@ -20,7 +34,8 @@ export function buildTheme(mode) {
     colors,
     spacing,
     radius,
-    typography,
+    typography: scaleTypography(textScale),
+    textScale,
     durations,
     motion,
     hitSlop,

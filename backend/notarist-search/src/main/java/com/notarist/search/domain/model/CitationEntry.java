@@ -14,6 +14,7 @@ public record CitationEntry(
         RetrievalReason retrievalReason,
         double relevanceScore,
         String citationText,
+        String chunkText,
         String sourceObjectKey,
         int chunkIndex
 ) {

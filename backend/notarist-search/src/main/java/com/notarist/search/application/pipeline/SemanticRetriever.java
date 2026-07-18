@@ -29,7 +29,11 @@ import java.util.stream.Collectors;
 public class SemanticRetriever {
 
     private static final Logger log = LoggerFactory.getLogger(SemanticRetriever.class);
-    private static final float MIN_COSINE_SCORE = 0.60f;
+    // bge-m3 query↔passage cosine for a directly relevant chunk measures ~0.55-0.60 (verified
+    // against a live index: the ingested akta the query asked about scored 0.574). 0.60 was
+    // above the model's real operating range and filtered out correct answers; 0.45 admits
+    // relevant candidates and leaves precision to RRF fusion, reranking and grounding.
+    private static final float MIN_COSINE_SCORE = 0.45f;
 
     private final VectorSearchPort   vectorSearchPort;
     private final QueryEmbeddingPort queryEmbeddingPort;

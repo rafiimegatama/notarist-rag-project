@@ -5,7 +5,7 @@ import client from './client';
 import { FEATURES } from '../constants/config';
 import { requireEndpoint } from './_support';
 import { unwrapOrThrow } from './envelope';
-import { normalizeSearchResult } from '../models/Search';
+import { normalizeSearchResult, SEARCH_INTENT } from '../models/Search';
 import { getItem, setItem } from '../utils/storage';
 
 const RECENT_KEY = 'search_recent_v1';
@@ -25,8 +25,17 @@ export async function runSearch({ query, mode = 'semantic', documentTypeFilter =
     documentTypeFilter,
     maxClassificationLevel,
     maxResults,
-    // Structured mode pins intent to a literal lookup; semantic lets the backend classify it.
-    intentOverride: mode === 'structured' ? 'LOOKUP' : null,
+    // Structured mode pins intent to a literal document lookup; semantic lets the backend classify it.
+    //
+    // Must be a member of the backend's SearchIntent enum
+    // (backend/notarist-search/.../domain/model/SearchIntent.java):
+    //   DOCUMENT_LOOKUP | REGULATION_LOOKUP | SEMANTIC_QUESTION | RELATED_DOCUMENT | CITATION_LOOKUP
+    //
+    // This sent 'LOOKUP' until Sprint 6 — not a member, so SearchQueryHandler ->
+    // IntentClassifier.classify() (which returns intentOverride() verbatim when non-null) blew up and
+    // EVERY structured search was an HTTP 400. Structured mode had never worked against the real
+    // endpoint. Keep this literal in the SEARCH_INTENTS list below so the validator can check it.
+    intentOverride: mode === 'structured' ? SEARCH_INTENT.DOCUMENT_LOOKUP : null,
   };
   const response = await client.post('/search', payload);
   // Was a hand-rolled `status !== 'SUCCESS'` check that threw a bare Error: no `kind`, so <ErrorState>

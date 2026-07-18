@@ -31,6 +31,7 @@
     "web": "expo start --web",
     "build": "expo export --platform web",
     "build:android": "expo export --platform android",
+    "test": "node scripts/validate.js && node scripts/validate-integration.js",
     "validate": "node scripts/validate.js",
     "validate:integration": "node scripts/validate-integration.js",
     "validate:all": "node scripts/validate.js && node scripts/validate-integration.js"

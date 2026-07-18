@@ -35,6 +35,7 @@ public class CitationResolver {
                 primaryReason,
                 score,
                 excerpt,
+                chunk.text(),
                 chunk.sourceObjectKey(),
                 chunk.chunkIndex());
     }

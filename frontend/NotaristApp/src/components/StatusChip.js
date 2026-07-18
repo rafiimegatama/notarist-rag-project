@@ -8,8 +8,13 @@ import AppText from './AppText';
  * hex. `tone` = 'soft' (tinted background) | 'solid' (filled) | 'outline'. Higher-level chips
  * (ApprovalChip, or screens using workflow meta) resolve label+color and pass them here so all
  * statuses look identical across the app.
+ *
+ * `accessibilityLabel` is optional and overrides the default (the visible label). Pass it when the
+ * label does not stand alone once read aloud: "⏳ 2 tertunda" tells a sighted user "two pending
+ * writes" from surrounding context a screen reader does not have. Omitting it keeps the old
+ * behaviour exactly.
  */
-export default function StatusChip({ label, color = 'textMuted', tone = 'soft', icon, size = 'md', onPress, style }) {
+export default function StatusChip({ label, color = 'textMuted', tone = 'soft', icon, size = 'md', onPress, accessibilityLabel, style }) {
   const theme = useTheme();
   const resolved = theme.colors[color] || color;
   const pad = size === 'sm' ? { pv: 2, ph: theme.spacing.sm } : { pv: 4, ph: theme.spacing.md };
@@ -24,7 +29,7 @@ export default function StatusChip({ label, color = 'textMuted', tone = 'soft', 
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityRole={onPress ? 'button' : 'text'}
-      accessibilityLabel={typeof label === 'string' ? label : undefined}
+      accessibilityLabel={accessibilityLabel ?? (typeof label === 'string' ? label : undefined)}
       style={[
         {
           flexDirection: 'row',

@@ -116,9 +116,34 @@ def _processed_key(source_key: str) -> str:
     return key
 
 
+def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Collapse overlapping/adjacent spans into disjoint ones.
+
+    Required for correctness, not tidiness. The model spans and the regex spans are collected
+    independently and DO overlap: a PER prediction can sit inside the e-mail the EMAIL regex
+    also matched. Splicing them one by one — even right-to-left — is unsound, because replacing
+    an inner span shifts every later offset, leaving the outer span's `end` pointing at stale
+    text. Observed live: siti.rahayu@example.com redacted to "[REDACTED]le.com".
+
+    That case over-redacted, which is survivable. The same arithmetic can just as easily cut
+    short and leave PII in the output, which is not — this is the redaction that gates the whole
+    pipeline. Merging first makes the spans disjoint, so every offset stays valid.
+    """
+    if not spans:
+        return []
+    ordered = sorted(spans)
+    merged = [list(ordered[0])]
+    for start, end in ordered[1:]:
+        if start <= merged[-1][1]:          # overlapping or touching
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(s, e) for s, e in merged]
+
+
 def _redact_spans(text: str, spans: list[tuple[int, int]]) -> str:
     """Splice out character spans, right-to-left so earlier offsets stay valid."""
-    for start, end in sorted(spans, key=lambda s: s[0], reverse=True):
+    for start, end in sorted(_merge_spans(spans), key=lambda s: s[0], reverse=True):
         text = text[:start] + "[REDACTED]" + text[end:]
     return text
 

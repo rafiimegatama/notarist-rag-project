@@ -3,17 +3,17 @@
 #   Docker → Spring Boot → REAL Supabase → REAL GCS → Application READY
 #
 # Contains ONLY the application container. It connects OUT to:
-#   • REAL Supabase PostgreSQL   (POSTGRES_URL, transaction pooler :6543)
+#   • REAL Supabase PostgreSQL   (POSTGRES_URL, SESSION pooler :5432 — see .env.hybrid.example)
 #   • REAL Google Cloud Storage  (GCS_BUCKET + a mounted service-account key)
 #
-# It deliberately runs NONE of the optional services — no local Postgres, no MinIO,
-# no storage emulator, no Qdrant, no Ollama, no OCR/NER/embedding sidecars. By
-# OperationalDegradationHierarchy.evaluate(), those degrade the system to at most
-# SEARCH_ONLY / LIMITED_SEARCH / DEGRADED — none of which is >= EMERGENCY, so
-# readiness stays 200 READY. Only PostgreSQL (CRITICAL) or GCS (EMERGENCY) can gate it.
+# It runs NONE of the optional services itself; the AI sidecars (OCR/NER/reranker/
+# embedding/Qdrant/Ollama) come from docker-compose.yml in this directory and are
+# reached over its notarist_network. Readiness stays gated only by PostgreSQL
+# (CRITICAL) and GCS (EMERGENCY) — OperationalDegradationHierarchy.evaluate().
 #
 # Run:
 #   cp .env.hybrid.example .env.hybrid   # then fill in REAL values
+#   docker compose up -d                 # sidecar stack (creates notarist_network)
 #   docker compose -f docker-compose.hybrid.yml --env-file .env.hybrid up --build
 # ─────────────────────────────────────────────────────────────────────────────
 services:
@@ -25,8 +25,18 @@ services:
     ports:
       - "${APP_PORT:-8080}:8080"
     environment:
-      SPRING_PROFILES_ACTIVE: prod
+      # dev, not prod: enables the idempotent DevUserBootstrap (demo login without manual
+      # SQL). Production account creation stays an explicit administrative act.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILE:-dev}
       PORT: 8080
+
+      # ---- Dev login bootstrap (dev/local profiles only; no-op if the user exists) ----
+      DEV_SEED_USERNAME: ${DEV_SEED_USERNAME:-demo.notaris}
+      DEV_SEED_PASSWORD: ${DEV_SEED_PASSWORD:-NotaristDemo123!}
+      DEV_SEED_TENANT_ID: ${DEV_SEED_TENANT_ID:-a0000000-0000-4000-8000-000000000001}
+
+      # ---- Browser clients (Expo web dev server origins) ----
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8081,http://localhost:19006}
 
       # ---- REAL Supabase PostgreSQL (mandatory — CRITICAL if down) ----
       POSTGRES_URL: ${POSTGRES_URL}
@@ -45,11 +55,20 @@ services:
       JWT_PRIVATE_KEY_PATH: /etc/notarist/keys/private.pem
       JWT_PUBLIC_KEY_PATH: /etc/notarist/keys/public.pem
 
-      # ---- OCR endpoint: property must be SET, but the OCR service is OPTIONAL and not run.
-      #      Fail-fast + startup probe off so an unreachable OCR endpoint does not block boot. ----
-      OCR_ENDPOINT: ${OCR_ENDPOINT:-http://ocr.disabled.invalid:8081}
+      # ---- AI sidecars — the docker-compose.yml stack on notarist_network. Probe/fail-fast
+      #      stay off: a slow sidecar must not block an app that can still serve auth + CRUD. ----
+      OCR_ENDPOINT: ${OCR_ENDPOINT:-http://notarist-ocr:8081}
       OCR_PROBE_ON_STARTUP: "false"
       OCR_FAIL_FAST: "false"
+      NER_BASE_URL: ${NER_BASE_URL:-http://notarist-ner:8082}
+      RERANKER_BASE_URL: ${RERANKER_BASE_URL:-http://notarist-reranker:8083}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://notarist-embedding:8084}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://notarist-ollama:11434}
+      QDRANT_URL: ${QDRANT_URL:-http://notarist-qdrant:6333}
+      # The Ollama container has llama3.2 pulled, not the qwen3:14b default.
+      LLM_MODEL: ${LLM_MODEL:-llama3.2:3b-instruct-q8_0}
+      # Dedicated bge-m3 sidecar for embeddings (both ingest and query paths).
+      EMBED_PROVIDER: ${EMBED_PROVIDER:-sidecar}
     volumes:
       # A real service-account key JSON (real GCS auth — not a mock).
       - ${GCS_CREDENTIALS_PATH}:/secrets/gcs-key.json:ro
@@ -58,8 +77,14 @@ services:
     restart: "no"
     networks:
       - notarist-hybrid-net
+      - notarist-net
 
 networks:
   notarist-hybrid-net:
     name: notarist_hybrid_network
     driver: bridge
+  # The sidecar stack's network (docker-compose.yml in this directory). Start that
+  # stack first — `docker compose up -d` — or this file fails with "network not found".
+  notarist-net:
+    external: true
+    name: notarist_network

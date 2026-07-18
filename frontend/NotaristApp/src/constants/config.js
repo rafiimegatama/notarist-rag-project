@@ -14,6 +14,9 @@ export const APP = {
 // Backend availability flags. Flip to true ONLY when the corresponding endpoint actually exists.
 // Sprint-1 reality: registration and notifications have no backend yet.
 export const FEATURES = {
+  // Both verified absent in Sprint 6 against the 12 controllers the backend actually ships
+  // (Assistant, Auth, Bundle, Case, CaseInsights, Dashboard, Document, Ingestion, OcrReview,
+  // Reminder, Search, Verification). Nothing serves registration or notifications — no route, no DTO.
   registerEndpoint: false,      // no POST /auth/register
   notificationsEndpoint: false, // no GET /notifications
   // `profileEndpoint` was removed in Sprint 5 (Task 10). It was declared and never read by a single
@@ -29,22 +32,62 @@ export const FEATURES = {
   // those are two different claims, and caseEndpoint below is false because of the second one.
   //
   // ---------------------------------------------------------------------------
-  // caseEndpoint — GET /api/v1/cases EXISTS. Do not flip this to true.
+  // caseEndpoint — GET /api/v1/cases EXISTS and returns CaseResponse.
   //
-  // The endpoint ships and returns CaseResponse. It is not renderable: the Case aggregate models no
-  // debtor, no bank and no collateral (grep the case domain for debtor|bank|collateral — nothing),
-  // and CaseCard shows item.debtorName as the primary line of every row with item.bank beneath it.
+  // Sprint 6.5 removed the RENDERING blocker. The paragraph here used to say CaseCard leads every row
+  // with item.debtorName over item.bank, so a live list would read "— · —" on every row: the Case
+  // aggregate models no debtor, no bank and no collateral (grep the case domain — still nothing), and
   // `notaris` exists only as assignedNotarisId, a UUID rather than a name.
   //
-  // Flipping it does worse than blank the cards. normalizeCase reads raw.status, the server sends
-  // `state`, and the default is 'DRAFT' — so every case in the list would render as
-  // "Tanpa Nama · — · DRAFT". Confidently wrong beats visibly broken at hiding a bug, which is why
-  // this stays false until the domain models those fields.
+  // CaseCard and CaseHeader now lead with `caseNumber` — the one identifying field BOTH the fixtures
+  // and CaseResponse carry — and render caseType/nomorAkta beneath it, dropping nulls rather than
+  // printing placeholder dashes. The debtor/bank/collateral fields survive as detail rows on
+  // CaseDetailScreen, populated from fixtures and "—" against the live endpoint. So a live case list
+  // is now identifiable and workable by case number.
   //
-  // Blocked on backend/domain work, not on this app. See docs/frontend/sprint-4-integration.md.
-  caseEndpoint: false,
+  // Sprint 7 VERIFIED IT RUNNING and turned it on. Against a real backend + real PostgreSQL, with
+  // real cases created through POST /cases, the live response feeds the real normalizers and renders:
+  //
+  //   GET /cases -> 200 {items:[…], page:{number,size,totalElements,totalPages,hasNext,…}}
+  //   rows       -> primary "14/VI/2026", detail "AJB"     (identifiable, no placeholder dashes)
+  //   GET /cases/{uuid}          -> 200 CaseResponse
+  //   GET /cases/{uuid}/timeline -> 200, entries render via occurredAt
+  //
+  // Getting there took two BACKEND fixes (a live endpoint is the only thing that could have found
+  // them; both are invisible to javac and to the module's own tests) — see FIXES.txt in the runbook:
+  //   · CaseJpaRepository.search/countBySearch: `:createdFrom IS NULL OR …` on an untyped null
+  //     Instant made PostgreSQL fail with 42P18 "could not determine data type of parameter $10".
+  //     Every GET /cases was a 500. The date filters are now CAST(:p AS timestamp).
+  //   · NotaristApplication had no @EnableJpaRepositories, so no JPA repository outside
+  //     com.notarist.web was ever found and the app could not start at all.
+  //
+  // Known and DELIBERATE, not a blocker: CaseController.listCases still has no free-text param, so
+  // the search box cannot filter server-side. api/cases.js surfaces that via `unsupportedFilters` and
+  // CaseListScreen banners it rather than lying — degraded honestly.
+  //
+  // Known and cosmetic: a freshly opened case is CASE_CREATED, which STATE_TO_UI_STATUS maps to null
+  // by design, so its chip reads "—" until it reaches WAITING_VERIFICATION. Real state, no UI bucket.
+  caseEndpoint: true,
 
-  bundleEndpoint: false,        // no /bundles
+  // ---------------------------------------------------------------------------
+  // bundleEndpoint — ON since Sprint 7, verified against the running backend. The UUID argument that
+  // kept it false is gone: with caseEndpoint on, bundle ids now come from real CaseResponses, not
+  // from 'bnd-001'. Exercised end to end against real PostgreSQL:
+  //
+  //   POST /cases/{uuid}/bundles     -> 201 BundleResponse (real bundleId)
+  //   GET  /cases/{uuid}/bundles     -> 200 [BundleResponse]   (a bare ARRAY, not a page)
+  //   GET  /bundles/{uuid}           -> 200 BundleResponse
+  //   GET  /bundles/{uuid}/timeline  -> 200, entries render via occurredAt
+  //
+  // normalizeBundle handles the real shape as written: BundleResponse has no `name` (-> null, the
+  // card falls back), and the per-stage statuses are projected from `workflowStatus`.
+  //
+  // STILL MISSING, and deliberately not hidden: nothing lists a bundle's DOCUMENTS
+  // (api/bundles#getBundleDocuments throws UNAVAILABLE rather than 404ing or guessing). BundleScreen
+  // scopes that failure to the documents section, so bundle detail + timeline still render. That is a
+  // backend gap — `GET /bundles/{bundleId}/documents`, or a bundleId filter on GET /documents — not a
+  // reason to keep the whole bundle screen on fixtures.
+  bundleEndpoint: true,
 
   // dashboardEndpoint — composed from /cases/statistics + /dashboard/summary + /reminders rather
   // than from /dashboard/summary alone, whose buckets are too coarse to answer the cards. The
@@ -57,22 +100,36 @@ export const FEATURES = {
   reminderEndpoint: true,
 
   // ---------------------------------------------------------------------------
-  // Sprint 5 re-audit against the backend source. These three said "no endpoint". That is now FALSE:
-  // OcrReviewController, VerificationController and BundleController all exist and serve real DTOs
-  // (OcrFieldResponse, VerificationResponse, BundleResponse). The comments below were describing a
-  // backend that has since shipped.
+  // Sprint 7 took the UUID excuse away — caseEndpoint and bundleEndpoint are on, so both of these are
+  // now callable with REAL ids. They were tried against the running backend with real ids, and both
+  // stay false for a NEW and much harder reason, found only by running them:
   //
-  // They stay false anyway, and the reason is the same for all three: they are addressed BY CASE ID
-  // or BY BUNDLE ID, and those ids come from the case list — which is still fixtures while
-  // caseEndpoint is false. A real call would carry 'case-001' and 404. The whole chain unblocks
-  // together, behind caseEndpoint, not one flag at a time. See TimelineService for the same argument.
+  //   GET /bundles/{real-uuid}/verification -> 404 VERIFICATION_NOT_FOUND
+  //   GET /documents/{real-uuid}/ocr        -> 404 OCR_REVIEW_NOT_FOUND
   //
-  // What changed in Sprint 5 is that the NORMALIZERS now match the real DTOs (models/Ocr.js,
-  // models/Verification.js, models/Bundle.js), so flipping these is now a flag flip rather than a
-  // rewrite. The remaining blocker is data, not code.
-  ocrReviewEndpoint: false,     // PUT /documents/{id}/ocr/fields/{fieldId} EXISTS (OcrReviewController)
-  verificationEndpoint: false,  // VerificationController EXISTS: checklist + POST /checklist/{itemId}
-  conversationListEndpoint: false, // genuinely absent: only /assistant/history/{sessionId} exists
+  // Neither aggregate is ever PROVISIONED. The use cases that would create them —
+  // VerificationProvisioningUseCase.initializeVerification and OcrReviewProvisioningUseCase — are
+  // implemented and wired to NOTHING: no controller exposes them, no event listener calls them, no
+  // scheduler runs them. Outside their own module they are referenced only by tests (grep the backend
+  // for initializeVerification: application service + tests, nothing else). So there is no sequence of
+  // HTTP calls a client can make that causes a Verification or an OcrReview to exist, and these two
+  // endpoints answer 404 forever.
+  //
+  // This is NOT a frontend blocker and cannot be fixed here. The app's code for both is correct and
+  // waiting: the screens read the real checklist / real OCR fields and post per ITEM and per FIELD id.
+  // What the backend owes is a provisioning trigger — most likely on the bundle status transition
+  // that means "ready to verify", and on OCR pipeline completion for the review.
+  //
+  // ocrReviewEndpoint additionally needs the ingestion pipeline (GCS bucket + a PaddleOCR service) to
+  // produce OCR output at all; neither runs in the local stack, so even a provisioned review would
+  // have no fields to show.
+  ocrReviewEndpoint: false,     // route exists; NO provisioning path -> 404 forever. Backend blocker.
+  verificationEndpoint: false,  // route exists; NO provisioning path -> 404 forever. Backend blocker.
+
+  // conversationListEndpoint — genuinely absent. AssistantController serves /assistant/ask,
+  // /assistant/ask/stream and /assistant/history/{sessionId}; there is no "list all conversations"
+  // and no delete. Verified: scripts/validate-integration.js reports both calls as planned-endpoint.
+  conversationListEndpoint: false,
 
   // Endpoints that are live today. These were the `LIVE` block — config nothing read, so these calls
   // were ungated. Now they are real flags, honoured by their api modules, and can be switched off to
@@ -80,6 +137,12 @@ export const FEATURES = {
   searchEndpoint: true,      // POST /search (SearchController)
   documentsEndpoint: true,   // GET /documents, /documents/{id} (DocumentController)
   assistantEndpoint: true,   // POST /assistant/ask, GET /assistant/history/{sessionId}
+  // assistantStreamEndpoint — POST /assistant/ask/stream (SSE). Served by AssistantController and
+  // verified present by validate-integration (it was the "unused endpoint · POST /assistant/ask/stream"
+  // note). The Assistant screen streams through api/assistantStream when this is on and falls back to
+  // the synchronous assistantEndpoint when it is off OR when a stream fails to start — so turning this
+  // off degrades to the whole-answer path, never to a fabricated one.
+  assistantStreamEndpoint: true,
   ingestEndpoint: true,      // POST /ingest… (IngestionController)
 
   // Developer-only: unlocks the Component Playground screen (a pure-UI showcase, no backend). Ships

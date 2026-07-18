@@ -66,6 +66,25 @@ export function bool(value, fallback = false) {
 }
 
 /**
+ * A THREE-state boolean: true / false / null-for-absent.
+ *
+ * `bool()` collapses "absent" into a fallback, which is right for a display toggle and wrong —
+ * sometimes dangerously — for a fact. The case that forced this into existence (Sprint 6):
+ * ChecklistItem.mandatory read through `bool(…, false)` reported every mandatory legal check as
+ * OPTIONAL whenever the field was missing. That is not a missing value rendering as a default; it is
+ * the app asserting something false about which checks a notary may skip.
+ *
+ * Use this wherever false is a CLAIM rather than a safe default. Screens render null as "—".
+ */
+export function triBool(value) {
+  if (isAbsent(value)) return null;
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
+/**
  * An ISO-8601 date string that actually parses, else fallback.
  *
  * The backend serializes every timestamp with Instant#toString / LocalDate#toString, so the wire

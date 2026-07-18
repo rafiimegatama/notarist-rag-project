@@ -15,7 +15,7 @@
 // This module deliberately does NOT normalize shapes — that is the normalizers' job. It only answers
 // "what did the server actually send me", safely.
 
-import { ApiError, ErrorKind } from './errors';
+import { ApiError, ErrorKind, kindForStatus, messageForKind, isRetryableKind } from './errors';
 
 /**
  * Pull the payload out of an axios response, whatever shape arrived.
@@ -59,15 +59,29 @@ export function isErrorEnvelope(response) {
  */
 export function envelopeError(response) {
   const body = (response && response.data) || {};
-  const status = response && response.status;
+  const status = (response && response.status) || null;
+  // Classify from the HTTP status rather than asserting SERVER. Verified against the running backend
+  // (Sprint 7): a missing case answers 404 + errorCode CASE_NOT_FOUND inside an ERROR envelope, and
+  // this used to report it as a retryable server fault — telling the notary "coba lagi nanti" about
+  // a record that does not exist, and handing retry.js a request it would replay until it gave up.
+  //
+  // A status BELOW 400 keeps the SERVER reading on purpose: that is the 200-with-status:"ERROR" case
+  // isErrorEnvelope exists for, where HTTP carries no failure signal and the body is the only sign of
+  // a backend fault. Only a real 4xx/5xx is allowed to speak for itself.
+  const kind = status && status >= 400 ? kindForStatus(status) : ErrorKind.SERVER;
+  const meta = body.meta;
   return new ApiError({
-    kind: ErrorKind.SERVER,
-    status: status || null,
+    kind,
+    status,
     // errorMessage is server-authored and may be English/technical; the UI copy comes from `kind`.
     // It is kept as the diagnostic, not the message, for the same reason ErrorState hides it in prod.
-    message: 'Terjadi gangguan pada server. Coba lagi nanti.',
+    message: messageForKind(kind),
     diagnostic: `envelope ERROR${body.errorCode ? ' ' + body.errorCode : ''}: ${body.errorMessage || '(no message)'}`,
-    retryable: true,
+    retryable: isRetryableKind(kind),
+    // Same support identifiers as the HTTP-error path, so a 200-with-status:ERROR is indistinguishable
+    // to the error panel (Sprint 10).
+    errorCode: body.errorCode ? String(body.errorCode) : null,
+    correlationId: meta && meta.correlationId ? String(meta.correlationId) : null,
     cause: null,
   });
 }

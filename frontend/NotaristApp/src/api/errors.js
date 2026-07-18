@@ -76,8 +76,21 @@ const STATUS_KIND = {
   503: ErrorKind.UNAVAILABLE,
 };
 
+/**
+ * A short, human-quotable reference for an error the user can read to support (Sprint 10). Client-
+ * generated, distinct from the backend correlationId: when the server sent one, THAT is used instead
+ * (it is in the backend's logs); this is the fallback so an offline or pre-flight failure — which the
+ * server never saw — still has a reference the user and support can talk about. The `NB-` prefix and
+ * base36 time make it short enough to read over the phone.
+ */
+export function generateDiagnosticId() {
+  const t = Date.now().toString(36).toUpperCase().slice(-6);
+  const r = Math.random().toString(36).slice(2, 5).toUpperCase();
+  return `NB-${t}-${r}`;
+}
+
 export class ApiError extends Error {
-  constructor({ kind, status, message, diagnostic, retryable, retryAfterMs, fieldErrors, cause }) {
+  constructor({ kind, status, message, diagnostic, retryable, retryAfterMs, fieldErrors, cause, errorCode, correlationId, diagnosticId }) {
     super(message);
     this.name = 'ApiError';
     this.kind = kind;
@@ -87,6 +100,13 @@ export class ApiError extends Error {
     this.retryAfterMs = retryAfterMs || null;
     this.fieldErrors = fieldErrors || null;
     this.cause = cause;
+    // Support-facing identifiers (Sprint 10). errorCode is the backend's machine code (CASE_NOT_FOUND
+    // …); correlationId is the server's trace id from the envelope meta, the best thing to give
+    // support because it is in their logs. diagnosticId is what the UI shows: the correlationId when
+    // there is one, else a generated client ref so EVERY error the user sees carries a reference.
+    this.errorCode = errorCode || null;
+    this.correlationId = correlationId || null;
+    this.diagnosticId = diagnosticId || correlationId || generateDiagnosticId();
     // Preserved so the pre-existing `isOffline`/`is404` predicates in _support.js keep working on a
     // normalized error. Removing these would silently change every context's offline detection.
     this.response = cause && cause.response;
@@ -150,20 +170,37 @@ function buildDiagnostic(error, status, kind) {
  * Normalize any thrown value into an ApiError. Total: never throws, always returns an ApiError.
  * Already-normalized errors pass through so the interceptor chain can call this more than once.
  */
+/**
+ * The ErrorKind an HTTP status implies. Extracted from normalizeError (Sprint 7) so that envelope.js
+ * can classify a status:"ERROR" body through the SAME table instead of hardcoding its own answer.
+ * Two classifiers for one concept is how a 404 came to be reported as a retryable server fault.
+ */
+export function kindForStatus(status) {
+  const mapped = STATUS_KIND[status];
+  if (mapped) return mapped;
+  // Unmapped statuses still get a sensible bucket rather than falling to UNKNOWN: any 5xx is a
+  // server fault the user can retry, any other 4xx is a client fault they cannot.
+  if (status >= 500) return ErrorKind.SERVER;
+  return ErrorKind.UNKNOWN;
+}
+
+/** The user-facing copy for a kind. */
+export function messageForKind(kind) {
+  return MESSAGES[kind] || MESSAGES[ErrorKind.UNKNOWN];
+}
+
+/** Whether a kind is worth replaying unchanged. */
+export function isRetryableKind(kind) {
+  return !!RETRYABLE[kind];
+}
+
 export function normalizeError(error) {
   if (isApiError(error)) return error;
 
   const status = error && error.response && error.response.status;
   let kind;
   if (status) {
-    kind = STATUS_KIND[status];
-    if (!kind) {
-      // Unmapped statuses still get a sensible bucket rather than falling to UNKNOWN: any 5xx is a
-      // server fault the user can retry, any other 4xx is a client fault they cannot.
-      if (status >= 500) kind = ErrorKind.SERVER;
-      else if (status >= 400) kind = ErrorKind.UNKNOWN;
-      else kind = ErrorKind.UNKNOWN;
-    }
+    kind = kindForStatus(status);
   } else if (error && (error.request || error.message === 'Network Error' || error.code)) {
     kind = classifyNetworkError(error);
   } else {
@@ -171,14 +208,21 @@ export function normalizeError(error) {
   }
 
   const data = error && error.response && error.response.data;
+  // The envelope carries { meta:{ correlationId }, errorCode } on an error body (ApiResponse.java).
+  // Read both when present so the error panel can show a real trace id and machine code.
+  const meta = data && typeof data === 'object' ? data.meta : null;
   return new ApiError({
     kind,
     status: status || null,
     message: MESSAGES[kind] || MESSAGES[ErrorKind.UNKNOWN],
     diagnostic: buildDiagnostic(error, status, kind),
     retryable: !!RETRYABLE[kind],
-    retryAfterMs: status === 429 ? parseRetryAfter(error.response.headers) : null,
+    // 429 and 503 are the two statuses that legitimately carry Retry-After — one says "slow down",
+    // the other "in maintenance, back at". Both drive the retry countdown.
+    retryAfterMs: (status === 429 || status === 503) ? parseRetryAfter(error.response.headers) : null,
     fieldErrors: status === 422 ? extractFieldErrors(data) : null,
+    errorCode: data && typeof data === 'object' && data.errorCode ? String(data.errorCode) : null,
+    correlationId: meta && meta.correlationId ? String(meta.correlationId) : null,
     cause: error,
   });
 }

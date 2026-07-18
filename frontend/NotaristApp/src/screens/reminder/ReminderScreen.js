@@ -12,6 +12,7 @@ import { SkeletonList } from '../../components/Skeleton';
 import { useTheme } from '../../context/ThemeContext';
 import { spacing } from '../../theme';
 import { relativeTime } from '../../utils/format';
+import usePolledResource from '../../hooks/usePolledResource';
 import { useReminders } from '../../state';
 
 const WINDOWS = [
@@ -39,6 +40,12 @@ export default function ReminderScreen() {
     filtered, loading, refreshing, error, offline, usingMock, fromCache, lastSyncedAt,
     window, setWindow, refresh,
   } = useReminders();
+
+  // Keep the deadline queue fresh while it is on screen. ReminderContext registers the 'reminders'
+  // refresher, but registration alone polls nothing (services/polling.js) — a visible subscriber is
+  // what arms focus-refresh and the poll timer, and until this line NO screen subscribed: the one
+  // list of statutory deadlines only ever refreshed on mount or a manual pull.
+  usePolledResource('reminders');
 
   // Memoized (Sprint 4, Task 10): this copied and sorted the whole list on EVERY render — including
   // every render caused by pull-to-refresh state — and then handed FlatList a brand-new array, so

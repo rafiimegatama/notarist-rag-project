@@ -4,6 +4,7 @@ import com.notarist.auth.infrastructure.security.JwtAuthenticationFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,7 +18,11 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.util.matcher.IpAddressMatcher;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -50,6 +55,7 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter) throws Exception {
         http
+            .cors(cors -> {})  // uses the corsConfigurationSource bean below
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -113,6 +119,28 @@ public class SecurityConfig {
     private boolean isPrivateAddress(String remoteAddress) {
         if (remoteAddress == null || remoteAddress.isBlank()) return false;
         return PRIVATE_NETWORKS.stream().anyMatch(matcher -> matcher.matches(remoteAddress));
+    }
+
+    /**
+     * Browser clients (the Expo web dev server) run on a different origin than the API, so
+     * without CORS headers every preflight is rejected and the web app cannot even reach
+     * /auth/login. Native mobile clients send no Origin header and are unaffected. The
+     * allowlist is env-overridable (CORS_ALLOWED_ORIGINS, comma-separated); the default
+     * covers only local dev servers — a production web origin must be set explicitly.
+     * Credentials stay disabled: auth travels in the Authorization header, not cookies.
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource(
+            @Value("${CORS_ALLOWED_ORIGINS:http://localhost:8081,http://localhost:19006}")
+            String allowedOrigins) {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(",")).map(String::trim).toList());
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setMaxAge(3600L);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
     }
 
     /**

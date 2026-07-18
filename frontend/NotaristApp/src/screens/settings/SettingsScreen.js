@@ -6,8 +6,10 @@ import AppText from '../../components/AppText';
 import SectionHeader from '../../components/SectionHeader';
 import SettingItem from '../../components/SettingItem';
 import Divider from '../../components/Divider';
+import QueueInspector from '../../components/QueueInspector';
 import { useTheme } from '../../context/ThemeContext';
-import { usePreferences } from '../../context/PreferencesContext';
+import { usePreferences, SAFETY_MODES } from '../../context/PreferencesContext';
+import { announce } from '../../utils/a11y';
 import { useAuth } from '../../context/AuthContext';
 import { APP, LINKS, PLATFORM_LABEL, FEATURES } from '../../constants/config';
 import { BASE_URL } from '../../api/client';
@@ -44,6 +46,8 @@ function ChipGroup({ options, value, onChange }) {
 
 const cycle = (arr, current) => arr[(arr.indexOf(current) + 1) % arr.length];
 
+const TEXT_SCALE_LABELS = { normal: 'Normal', large: 'Besar', xlarge: 'Sangat Besar' };
+
 export default function SettingsScreen({ navigation }) {
   const theme = useTheme();
   const prefs = usePreferences();
@@ -68,6 +72,14 @@ export default function SettingsScreen({ navigation }) {
         <SettingItem icon="🔔" title="Notifikasi" subtitle="Pemberitahuan sistem" onPress={() => navigation.navigate('Notification')} />
       </Card>
 
+      {/* Sinkronisasi — the offline mutation queue (Sprint 1).
+          Lives in Settings rather than behind the badge alone because it is where a notary looks when
+          they are unsure whether their work is safe, and because it must be reachable when nothing is
+          pending: "Semua tersinkron" is the answer to that question, and an inspector you can only
+          open when something is wrong cannot give it. */}
+      <SectionHeader title="Sinkronisasi" />
+      <QueueInspector />
+
       {/* Appearance */}
       <SectionHeader title="Tampilan" />
       <Card padded={false}>
@@ -79,6 +91,19 @@ export default function SettingsScreen({ navigation }) {
             { label: 'Sistem', value: 'system' },
             { label: 'Terang', value: 'light' },
             { label: 'Gelap', value: 'dark' },
+          ]}
+        />
+        <Divider inset={56} />
+        {/* Large Font (Sprint 11) — scales the whole app's typography. Applies on top of the OS font
+            size, which the app also honours. Announced so a screen-reader user hears the change land. */}
+        <SettingItem icon="🔤" title="Ukuran Teks" subtitle="Perbesar teks di seluruh aplikasi" />
+        <ChipGroup
+          value={prefs.textScale}
+          onChange={(v) => { prefs.setTextScale(v); announce(`Ukuran teks: ${TEXT_SCALE_LABELS[v]}`); }}
+          options={[
+            { label: 'Normal', value: 'normal' },
+            { label: 'Besar', value: 'large' },
+            { label: 'Sangat Besar', value: 'xlarge' },
           ]}
         />
       </Card>
@@ -105,7 +130,11 @@ export default function SettingsScreen({ navigation }) {
           title="Mode Keamanan"
           subtitle="Ketat menolak jawaban dengan grounding rendah"
           value={prefs.aiSafetyMode}
-          onPress={() => prefs.setAiSafetyMode(cycle(['STRICT', 'BALANCED', 'PERMISSIVE'], prefs.aiSafetyMode))}
+          // Cycles the backend enum itself (SAFETY_MODES) rather than a hand-typed copy of it. The
+          // copy that used to be here read PERMISSIVE — not a member of AssistantSafetyMode — so this
+          // control could put an impossible value into a preference bound for the API. Importing the
+          // list means the enum has ONE definition in the frontend, next to the Java file it mirrors.
+          onPress={() => prefs.setAiSafetyMode(cycle(SAFETY_MODES, prefs.aiSafetyMode))}
         />
         <Divider inset={56} />
         <SettingItem
